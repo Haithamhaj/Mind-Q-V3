@@ -1,0 +1,116 @@
+{
+  "version": "1.2.2",
+  "name": "Master EDA Platform Specification",
+  "description": "Comprehensive EDA pipeline specification for automated data analysis",
+  "phases": {
+    "0": {
+      "name": "Foundation & Architecture",
+      "description": "Project setup and infrastructure",
+      "status": "completed"
+    },
+    "1": {
+      "name": "Goal & KPIs Definition",
+      "description": "Define business objectives and success metrics",
+      "status": "pending"
+    },
+    "2": {
+      "name": "Data Ingestion",
+      "description": "Upload and validate data files",
+      "status": "pending"
+    },
+    "3": {
+      "name": "Schema Discovery",
+      "description": "Analyze data structure and types",
+      "status": "pending"
+    },
+    "4": {
+      "name": "Data Profiling",
+      "description": "Generate comprehensive data statistics",
+      "status": "pending"
+    },
+    "5": {
+      "name": "Missing Data Analysis",
+      "description": "Identify and analyze missing data patterns",
+      "status": "pending"
+    },
+    "6": {
+      "name": "Data Standardization",
+      "description": "Clean and standardize data formats",
+      "status": "pending"
+    },
+    "7": {
+      "name": "Feature Engineering",
+      "description": "Create derived features and transformations",
+      "status": "pending"
+    },
+    "7.5": {
+      "name": "Encoding & Scaling",
+      "description": "Encode categorical variables and scale features",
+      "status": "pending"
+    },
+    "8": {
+      "name": "Data Merging",
+      "description": "Combine multiple datasets",
+      "status": "pending"
+    },
+    "9": {
+      "name": "Correlation Analysis",
+      "description": "Analyze relationships between variables",
+      "status": "pending"
+    },
+    "9.5": {
+      "name": "Business Validation",
+      "description": "Validate findings against business rules",
+      "status": "pending"
+    },
+    "10": {
+      "name": "Data Packaging",
+      "description": "Prepare final dataset for modeling",
+      "status": "pending"
+    },
+    "10.5": {
+      "name": "Train/Test Split",
+      "description": "Split data for model development",
+      "status": "pending"
+    },
+    "11": {
+      "name": "Advanced Analytics",
+      "description": "Perform advanced statistical analysis",
+      "status": "pending"
+    },
+    "11.5": {
+      "name": "Feature Selection",
+      "description": "Select optimal features for modeling",
+      "status": "pending"
+    },
+    "12": {
+      "name": "Text Analysis",
+      "description": "Analyze text data using NLP techniques",
+      "status": "pending"
+    },
+    "13": {
+      "name": "Monitoring & Reporting",
+      "description": "Generate reports and set up monitoring",
+      "status": "pending"
+    }
+  },
+  "domains": [
+    "finance",
+    "healthcare",
+    "retail",
+    "manufacturing",
+    "technology",
+    "education",
+    "government",
+    "general"
+  ],
+  "supported_formats": [
+    "csv",
+    "xlsx",
+    "parquet",
+    "json"
+  ],
+  "max_file_size_mb": 500,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
