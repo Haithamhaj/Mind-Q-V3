@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 from app.services.phase0_quality_control import QualityControlService
 
 
-def test_stop_on_high_missing():
-    """Test STOP trigger on >20% missing"""
+def test_warn_on_high_missing():
+    """Test WARN trigger on >20% missing (Phase 5 will handle imputation)"""
     df = pd.DataFrame({
         'col1': [1, 2, 3, 4, 5],
         'col2': [None, None, None, None, 5]  # 80% missing
@@ -22,9 +22,9 @@ def test_stop_on_high_missing():
     service = QualityControlService(df)
     result = service.run()
     
-    assert result.status == "STOP", f"Expected STOP, got {result.status}"
-    assert len(result.errors) > 0, "Expected errors for high missing %"
-    print("✅ STOP on high missing: PASS")
+    assert result.status in ["WARN", "PASS"], f"Expected WARN or PASS, got {result.status}"
+    assert len(result.warnings) > 0, "Expected warnings for high missing %"
+    print("✅ WARN on high missing (Phase 5 handles imputation): PASS")
 
 
 def test_stop_on_high_duplicates():
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     print("-" * 50)
     
     try:
-        test_stop_on_high_missing()
+        test_warn_on_high_missing()
         test_stop_on_high_duplicates()
         test_pass_on_clean_data()
         

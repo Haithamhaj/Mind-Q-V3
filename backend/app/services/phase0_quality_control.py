@@ -23,7 +23,7 @@ class QualityControlResult(BaseModel):
 class QualityControlService:
     """
     Quality Control Service implementing Phase 1 decision rules:
-    1. critical_missing_pct(field) > 0.20 ⇒ STOP
+    1. critical_missing_pct(field) > 0.20 ⇒ WARN (Phase 5 will handle imputation)
     2. date_inversion_pct > 0.005 ⇒ WARN  
     3. orphans > 0.10 OR duplicates > 0.10 ⇒ STOP
     """
@@ -78,7 +78,7 @@ class QualityControlService:
         """
         Calculate missing percentage per column and apply critical threshold
         
-        Decision Rule: critical_missing_pct(field) > 0.20 ⇒ STOP
+        Decision Rule: critical_missing_pct(field) > 0.20 ⇒ WARN (Phase 5 handles imputation)
         
         Returns:
             Dictionary mapping column names to missing percentages
@@ -88,8 +88,8 @@ class QualityControlService:
         # Check critical threshold (20%)
         for col, pct in missing_pct.items():
             if pct > 0.20:
-                self.errors.append(
-                    f"Column '{col}' has {pct:.1%} missing data (>20% threshold) - STOP condition triggered"
+                self.warnings.append(
+                    f"Column '{col}' has {pct:.1%} missing data - will apply advanced imputation in Phase 5"
                 )
         
         return {k: round(v, 4) for k, v in missing_pct.items()}

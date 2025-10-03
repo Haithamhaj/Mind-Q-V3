@@ -23,7 +23,7 @@ def create_sample_data():
         'score': np.random.normal(75, 15, 100)
     }
     
-    # Scenario 2: High missing data (should STOP)
+    # Scenario 2: High missing data (should WARN - Phase 5 will handle imputation)
     bad_missing_data = {
         'id': range(1, 101),
         'name': [f'User_{i}' if i % 3 != 0 else None for i in range(1, 101)],  # 33% missing
@@ -69,7 +69,7 @@ def demo_quality_control():
     # Test each scenario
     scenarios = [
         ("Good Data (Should PASS)", "good", ["id"]),
-        ("High Missing Data (Should STOP)", "bad_missing", ["id"]),
+        ("High Missing Data (Should WARN)", "bad_missing", ["id"]),
         ("Duplicate Keys (Should STOP)", "duplicates", ["id"]),
         ("Date Issues (Should WARN)", "date_issues", ["id"])
     ]
@@ -126,7 +126,7 @@ def demo_quality_control():
     # Show summary
     print(f"\n{'=' * 60}")
     print("DECISION RULES IMPLEMENTED:")
-    print("1. critical_missing_pct(field) > 0.20 ⇒ STOP")
+    print("1. critical_missing_pct(field) > 0.20 ⇒ WARN (Phase 5 handles imputation)")
     print("2. date_inversion_pct > 0.005 ⇒ WARN")
     print("3. orphans > 0.10 OR duplicates > 0.10 ⇒ STOP")
     print("=" * 60)
