@@ -21,6 +21,11 @@ from ...services.phase3_schema import Phase3SchemaService, SchemaService, Schema
 from ...services.phase0_quality_control import QualityControlService, QualityControlResult
 from ...services.domain_packs import DOMAIN_PACKS
 from ...config import settings
+from ...services.phase4_profiling import ProfilingService, ProfilingResult
+from ...services.phase5_missing_data import MissingDataService, ImputationResult
+import json
+from typing import Optional
+from fastapi import Form
 
 router = APIRouter()
 
@@ -421,6 +426,70 @@ async def run_combined_phases(
 
 
 # ===== COMBINED WORKFLOW ENDPOINTS =====
+
+@router.post("/phase4-profiling", response_model=ProfilingResult)
+async def run_phase4():
+    """Phase 4: Profiling (runs on typed data from Phase 3)"""
+    try:
+        # Load typed data
+        data_path = settings.artifacts_dir / "typed_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No typed data found. Run Phase 3 first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        # Run Phase 4
+        service = ProfilingService(df=df)
+        result = service.run()
+        
+        # Save profile report
+        with open(settings.artifacts_dir / "profile_summary.json", "w") as f:
+            json.dump(result.model_dump(), f, indent=2)
+        
+        return result
+    
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase5-missing-data", response_model=ImputationResult)
+async def run_phase5(group_column: Optional[str] = Form(None)):
+    """Phase 5: Missing Data Handling"""
+    try:
+        # Load typed data
+        data_path = settings.artifacts_dir / "typed_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No typed data found. Run Phase 3 first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        # Run Phase 5
+        service = MissingDataService(df=df, group_col=group_column)
+        df_imputed, result = service.run()
+        
+        # Stop if validation failed
+        if result.status == "STOP":
+            raise HTTPException(
+                400,
+                f"Imputation validation failed. Completeness: {result.record_completeness:.1%}"
+            )
+        
+        # Save imputed data
+        df_imputed.to_parquet(
+            settings.artifacts_dir / "imputed_data.parquet",
+            compression='zstd'
+        )
+        
+        # Save imputation policy
+        with open(settings.artifacts_dir / "imputation_policy.json", "w") as f:
+            json.dump(result.model_dump(), f, indent=2)
+        
+        return result
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 @router.post("/workflow/domain-check")
 async def workflow_domain_check(
