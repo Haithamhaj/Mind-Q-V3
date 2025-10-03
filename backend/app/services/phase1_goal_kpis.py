@@ -7,12 +7,96 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 from pathlib import Path
+from pydantic import BaseModel
 
 from ..models.schemas import (
     GoalDefinition, KPIDefinition, DomainSelection, 
-    Phase1Config, Phase1Response, DomainInfo, DomainType
+    Phase1Config, Phase1Response, DomainInfo, DomainType,
+    DomainCompatibilityResult, Phase1DomainCompatibilityResponse
 )
+from .domain_packs import DOMAIN_PACKS, get_domain_pack, suggest_domain
 from ..config import settings
+
+
+class DomainCompatibilityResult(BaseModel):
+    status: str  # "OK", "WARN", "STOP"
+    domain: str
+    match_percentage: float
+    matched_columns: List[str]
+    missing_columns: List[str]
+    suggestions: Dict[str, float]
+    message: str
+
+
+class GoalKPIsResult(BaseModel):
+    domain: str
+    kpis: List[str]
+    compatibility: DomainCompatibilityResult
+
+
+class GoalKPIsService:
+    def __init__(self, columns: List[str], domain: Optional[str] = None):
+        self.columns = columns
+        self.requested_domain = domain
+    
+    def run(self) -> GoalKPIsResult:
+        """Execute Phase 1: Goal & KPIs"""
+        # Auto-suggest if no domain specified
+        if not self.requested_domain:
+            suggestions = suggest_domain(self.columns)
+            best_match = max(suggestions.items(), key=lambda x: x[1])
+            self.requested_domain = best_match[0]
+        
+        # Validate domain compatibility
+        compatibility = self._check_compatibility()
+        
+        # Load KPIs
+        domain_pack = get_domain_pack(self.requested_domain)
+        
+        return GoalKPIsResult(
+            domain=self.requested_domain,
+            kpis=domain_pack.kpis,
+            compatibility=compatibility
+        )
+    
+    def _check_compatibility(self) -> DomainCompatibilityResult:
+        """Check if dataset matches selected domain"""
+        domain_pack = get_domain_pack(self.requested_domain)
+        
+        # Normalize column names
+        expected_lower = [c.lower() for c in domain_pack.expected_columns]
+        columns_lower = [c.lower() for c in self.columns]
+        
+        # Calculate matches
+        matched = [c for c in expected_lower if c in columns_lower]
+        missing = [c for c in expected_lower if c not in columns_lower]
+        match_pct = len(matched) / len(expected_lower)
+        
+        # Get alternative suggestions
+        suggestions = suggest_domain(self.columns)
+        
+        # Determine status
+        if match_pct >= 0.70:
+            status = "OK"
+            message = f"Domain '{self.requested_domain}' is compatible ({match_pct:.1%} match)"
+        elif match_pct >= 0.30:
+            status = "WARN"
+            top_suggestion = max(suggestions.items(), key=lambda x: x[1])
+            message = f"Low compatibility ({match_pct:.1%}). Consider '{top_suggestion[0]}' ({top_suggestion[1]:.1%})"
+        else:
+            status = "STOP"
+            top_suggestion = max(suggestions.items(), key=lambda x: x[1])
+            message = f"Domain incompatible ({match_pct:.1%}). Use '{top_suggestion[0]}' instead ({top_suggestion[1]:.1%})"
+        
+        return DomainCompatibilityResult(
+            status=status,
+            domain=self.requested_domain,
+            match_percentage=round(match_pct, 3),
+            matched_columns=matched,
+            missing_columns=missing,
+            suggestions=suggestions,
+            message=message
+        )
 
 
 class Phase1Service:
@@ -353,6 +437,80 @@ class Phase1Service:
             return Phase1Response(
                 status="error",
                 message=f"Failed to validate configuration: {str(e)}"
+            )
+    
+    def check_domain_compatibility(self, domain_name: str, columns: List[str]) -> Phase1DomainCompatibilityResponse:
+        """
+        Check domain compatibility based on column names.
+        
+        Decision Rules:
+        - >=70% expected columns present ⇒ OK
+        - 50%-30% match ⇒ WARN with alternative suggestions
+        - <30% ⇒ STOP: Domain Pack not compatible
+        """
+        try:
+            # Get domain pack
+            try:
+                domain_pack = get_domain_pack(domain_name)
+            except ValueError as e:
+                return Phase1DomainCompatibilityResponse(
+                    status="error",
+                    message=str(e)
+                )
+            
+            # Calculate compatibility
+            expected_lower = [c.lower() for c in domain_pack.expected_columns]
+            columns_lower = [c.lower() for c in columns]
+            
+            matched_columns = []
+            missing_columns = []
+            
+            for expected_col in domain_pack.expected_columns:
+                if expected_col.lower() in columns_lower:
+                    matched_columns.append(expected_col)
+                else:
+                    missing_columns.append(expected_col)
+            
+            match_percentage = len(matched_columns) / len(domain_pack.expected_columns)
+            
+            # Determine status and message
+            if match_percentage >= 0.7:
+                status = "OK"
+                message = f"Domain '{domain_name}' is compatible ({match_percentage:.1%} match)"
+            elif match_percentage >= 0.3:
+                status = "WARN"
+                message = f"Domain '{domain_name}' has partial compatibility ({match_percentage:.1%} match). Consider alternatives."
+            else:
+                status = "STOP"
+                message = f"Domain '{domain_name}' is not compatible ({match_percentage:.1%} match). Domain Pack not suitable."
+            
+            # Get alternative suggestions if needed
+            suggestions = []
+            if status in ["WARN", "STOP"]:
+                domain_suggestions = suggest_domain(columns)
+                # Get top 3 alternatives
+                suggestions = list(domain_suggestions.keys())[:3]
+            
+            result = DomainCompatibilityResult(
+                domain=domain_name,
+                match_percentage=match_percentage,
+                status=status,
+                matched_columns=matched_columns,
+                missing_columns=missing_columns,
+                suggestions=suggestions,
+                message=message
+            )
+            
+            return Phase1DomainCompatibilityResponse(
+                status="success",
+                message="Domain compatibility check completed",
+                data=result
+            )
+            
+        except Exception as e:
+            return Phase1DomainCompatibilityResponse(
+                status="error",
+                message=f"Failed to check domain compatibility: {str(e)}"
             )
     
     def _load_config(self) -> Phase1Config:
