@@ -37,6 +37,7 @@ from ...services.phase10_5_split import SplitService, SplitResult
 from ...services.phase11_advanced import AdvancedExplorationService, AdvancedExplorationResult
 from ...services.phase11_5_selection import FeatureSelectionService, SelectionResult
 from ...services.phase13_monitoring import MonitoringService, MonitoringResult
+from ...services.phase12.orchestrator import Phase12Orchestrator, Phase12Result
 
 router = APIRouter()
 
@@ -630,6 +631,43 @@ async def run_phase13():
             json.dump(result.dict(), f, indent=2)
         
         return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase12-text-features", response_model=Phase12Result)
+async def run_phase12():
+    """
+    Phase 12: Text Features (MVP - Optional)
+    
+    MVP includes:
+    - Text column detection
+    - Basic text features (length, word count, etc.)
+    - Sentiment analysis (English VADER + Simple Arabic)
+    
+    Future enhancements (not yet implemented):
+    - Topic modeling (LDA)
+    - Keyword extraction (TF-IDF, RAKE)
+    - Named Entity Recognition (spaCy, CAMeL Tools)
+    - Text clustering (KMeans)
+    """
+    try:
+        # Load data (use merged or train data)
+        data_path = settings.artifacts_dir / "merged_data.parquet"
+        if not data_path.exists():
+            data_path = settings.artifacts_dir / "train.parquet"
+        
+        if not data_path.exists():
+            raise HTTPException(400, "No data found. Run previous phases first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        # Run Phase 12
+        orchestrator = Phase12Orchestrator(df=df)
+        result = orchestrator.run(settings.artifacts_dir)
+        
+        return result
+    
     except Exception as e:
         raise HTTPException(500, str(e))
 
