@@ -23,6 +23,9 @@ from ...services.domain_packs import DOMAIN_PACKS
 from ...config import settings
 from ...services.phase4_profiling import ProfilingService, ProfilingResult
 from ...services.phase5_missing_data import MissingDataService, ImputationResult
+from ...services.phase6_standardization import StandardizationService, StandardizationResult
+from ...services.phase7_features import FeatureDraftService, FeatureDraftResult
+from ...services.phase7_5_encoding import EncodingScalingService, EncodingScalingResult
 import json
 from typing import Optional
 from fastapi import Form
@@ -488,6 +491,99 @@ async def run_phase5(group_column: Optional[str] = Form(None)):
     
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase6-standardization", response_model=StandardizationResult)
+async def run_phase6(domain: str = Form("logistics")):
+    """Phase 6: Standardization"""
+    try:
+        data_path = settings.artifacts_dir / "imputed_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No imputed data found. Run Phase 5 first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        service = StandardizationService(df=df, domain=domain)
+        df_std, result = service.run()
+        
+        # Save standardized data
+        df_std.to_parquet(
+            settings.artifacts_dir / "standardized_data.parquet",
+            compression='zstd'
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase7-features", response_model=FeatureDraftResult)
+async def run_phase7(domain: str = Form("logistics")):
+    """Phase 7: Feature Draft"""
+    try:
+        data_path = settings.artifacts_dir / "standardized_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No standardized data found. Run Phase 6 first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        service = FeatureDraftService(df=df, domain=domain)
+        df_features, result = service.run()
+        
+        # Save feature data
+        df_features.to_parquet(
+            settings.artifacts_dir / "features_data.parquet",
+            compression='zstd'
+        )
+        
+        # Save feature spec
+        with open(settings.artifacts_dir / "feature_spec.json", "w") as f:
+            json.dump(result.model_dump(), f, indent=2)
+        
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase7-5-encoding", response_model=EncodingScalingResult)
+async def run_phase7_5(
+    target_column: Optional[str] = Form(None),
+    domain: str = Form("logistics")
+):
+    """Phase 7.5: Encoding & Scaling (requires split data)"""
+    try:
+        # Load split data
+        train_path = settings.artifacts_dir / "train.parquet"
+        val_path = settings.artifacts_dir / "validation.parquet"
+        test_path = settings.artifacts_dir / "test.parquet"
+        
+        if not train_path.exists():
+            raise HTTPException(400, "No split data found. Run Phase 10.5 (split) first.")
+        
+        df_train = pd.read_parquet(train_path)
+        df_val = pd.read_parquet(val_path) if val_path.exists() else None
+        df_test = pd.read_parquet(test_path) if test_path.exists() else None
+        
+        service = EncodingScalingService(
+            df_train=df_train,
+            df_val=df_val,
+            df_test=df_test,
+            target_col=target_column,
+            domain=domain
+        )
+        
+        df_train_enc, df_val_enc, df_test_enc, result = service.run(settings.artifacts_dir)
+        
+        # Save encoded data
+        df_train_enc.to_parquet(settings.artifacts_dir / "train_encoded.parquet")
+        if df_val_enc is not None:
+            df_val_enc.to_parquet(settings.artifacts_dir / "val_encoded.parquet")
+        if df_test_enc is not None:
+            df_test_enc.to_parquet(settings.artifacts_dir / "test_encoded.parquet")
+        
+        return result
     except Exception as e:
         raise HTTPException(500, str(e))
 
