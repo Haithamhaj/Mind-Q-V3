@@ -32,6 +32,11 @@ from fastapi import Form
 from ...services.phase8_merging import MergingService, MergingResult
 from ...services.phase9_correlations import CorrelationsService, CorrelationsResult
 from ...services.phase9_5_business_validation import BusinessValidationService, BusinessValidationResult
+from ...services.phase10_packaging import PackagingService, PackagingResult
+from ...services.phase10_5_split import SplitService, SplitResult
+from ...services.phase11_advanced import AdvancedExplorationService, AdvancedExplorationResult
+from ...services.phase11_5_selection import FeatureSelectionService, SelectionResult
+from ...services.phase13_monitoring import MonitoringService, MonitoringResult
 
 router = APIRouter()
 
@@ -494,6 +499,137 @@ async def run_phase5(group_column: Optional[str] = Form(None)):
     
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase10-packaging", response_model=PackagingResult)
+async def run_phase10():
+    """Phase 10: Packaging (Pre-Split)"""
+    try:
+        service = PackagingService(artifacts_dir=settings.artifacts_dir)
+        result = service.run()
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase10-5-split", response_model=SplitResult)
+async def run_phase10_5(
+    target_column: Optional[str] = Form(None),
+    time_column: Optional[str] = Form(None)
+):
+    """Phase 10.5: Train/Validation/Test Split"""
+    try:
+        data_path = settings.artifacts_dir / "merged_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No merged data found.")
+        
+        df = pd.read_parquet(data_path)
+        
+        service = SplitService(
+            df=df,
+            target_col=target_column,
+            time_col=time_column
+        )
+        
+        df_train, df_val, df_test, result = service.run()
+        
+        # Save splits
+        df_train.to_parquet(settings.artifacts_dir / "train.parquet")
+        df_val.to_parquet(settings.artifacts_dir / "validation.parquet")
+        df_test.to_parquet(settings.artifacts_dir / "test.parquet")
+        
+        # Save split indices
+        with open(settings.artifacts_dir / "split_indices.json", "w") as f:
+            json.dump(result.dict(), f, indent=2)
+        
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase11-advanced", response_model=AdvancedExplorationResult)
+async def run_phase11():
+    """Phase 11: Advanced Exploration"""
+    try:
+        train_path = settings.artifacts_dir / "train.parquet"
+        if not train_path.exists():
+            raise HTTPException(400, "No train data found. Run Phase 10.5 first.")
+        
+        df_train = pd.read_parquet(train_path)
+        
+        service = AdvancedExplorationService(df=df_train)
+        result = service.run(settings.artifacts_dir)
+        
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase11-5-selection", response_model=SelectionResult)
+async def run_phase11_5(
+    target_column: str = Form(...),
+    top_k: int = Form(25)
+):
+    """Phase 11.5: Feature Selection & Ranking"""
+    try:
+        train_path = settings.artifacts_dir / "train.parquet"
+        val_path = settings.artifacts_dir / "validation.parquet"
+        
+        if not train_path.exists():
+            raise HTTPException(400, "No train data found.")
+        
+        df_train = pd.read_parquet(train_path)
+        df_val = pd.read_parquet(val_path)
+        
+        service = FeatureSelectionService(
+            df_train=df_train,
+            df_val=df_val,
+            target_col=target_column,
+            top_k=top_k
+        )
+        
+        selected_features, result = service.run()
+        
+        # Save selected features
+        with open(settings.artifacts_dir / "selected_features.json", "w") as f:
+            json.dump(result.dict(), f, indent=2)
+        # Save ranking report CSV
+        try:
+            import csv
+            ranking_csv = settings.artifacts_dir / "ranking_report.csv"
+            with open(ranking_csv, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["feature", "score", "rank"])
+                for fr in result.feature_rankings:
+                    writer.writerow([fr.feature, fr.score, fr.rank])
+        except Exception:
+            pass
+        
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase13-monitoring", response_model=MonitoringResult)
+async def run_phase13():
+    """Phase 13: Monitoring & Drift Setup"""
+    try:
+        train_path = settings.artifacts_dir / "train.parquet"
+        if not train_path.exists():
+            raise HTTPException(400, "No train data found.")
+        
+        df_train = pd.read_parquet(train_path)
+        
+        service = MonitoringService(df=df_train)
+        result = service.run()
+        
+        # Save drift config
+        with open(settings.artifacts_dir / "drift_config.json", "w") as f:
+            json.dump(result.dict(), f, indent=2)
+        
+        return result
     except Exception as e:
         raise HTTPException(500, str(e))
 
