@@ -374,3 +374,4 @@ class TestSchemaServiceIntegration:
         assert 'procedure' in result.categorical_columns
         assert 'gender' in result.categorical_columns
 
+

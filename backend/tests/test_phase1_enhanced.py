@@ -242,3 +242,4 @@ class TestDomainCompatibilityWorkflow:
         assert result.data.status in ["WARN", "STOP"]  # Partial match
         assert len(result.data.suggestions) > 0  # Should suggest alternatives
 
+

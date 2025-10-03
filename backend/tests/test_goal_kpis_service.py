@@ -264,3 +264,4 @@ class TestGoalKPIsServiceIntegration:
         assert "incompatible" in result.compatibility.message
         assert "Use" in result.compatibility.message
 
+
