@@ -29,6 +29,9 @@ from ...services.phase7_5_encoding import EncodingScalingService, EncodingScalin
 import json
 from typing import Optional
 from fastapi import Form
+from ...services.phase8_merging import MergingService, MergingResult
+from ...services.phase9_correlations import CorrelationsService, CorrelationsResult
+from ...services.phase9_5_business_validation import BusinessValidationService, BusinessValidationResult
 
 router = APIRouter()
 
@@ -489,6 +492,102 @@ async def run_phase5(group_column: Optional[str] = Form(None)):
         
         return result
     
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ===== PHASE 8-9.5 ENDPOINTS =====
+
+@router.post("/phase8-merging", response_model=MergingResult)
+async def run_phase8():
+    """Phase 8: Merging & Keys"""
+    try:
+        data_path = settings.artifacts_dir / "features_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No feature data found. Run Phase 7 first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        # For MVP, no additional tables to merge
+        service = MergingService(main_df=df)
+        df_merged, result = service.run(settings.artifacts_dir)
+        
+        if result.status == "STOP":
+            raise HTTPException(400, f"Merging failed: {result.issues}")
+        
+        # Save merged data
+        df_merged.to_parquet(
+            settings.artifacts_dir / "merged_data.parquet",
+            compression='zstd'
+        )
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase9-correlations", response_model=CorrelationsResult)
+async def run_phase9():
+    """Phase 9: Summaries & Correlations"""
+    try:
+        data_path = settings.artifacts_dir / "merged_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No merged data found. Run Phase 8 first.")
+        
+        df = pd.read_parquet(data_path)
+        
+        service = CorrelationsService(df=df)
+        result = service.run()
+        
+        # Save correlation matrix
+        with open(settings.artifacts_dir / "correlation_matrix.json", "w") as f:
+            json.dump(result.model_dump(), f, indent=2)
+        
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/phase9-5-business-validation", response_model=BusinessValidationResult)
+async def run_phase9_5(domain: str = Form("logistics")):
+    """Phase 9.5: Business Logic Validation"""
+    try:
+        # Load correlations from Phase 9
+        corr_path = settings.artifacts_dir / "correlation_matrix.json"
+        if not corr_path.exists():
+            raise HTTPException(400, "No correlations found. Run Phase 9 first.")
+        
+        with open(corr_path) as f:
+            corr_data = json.load(f)
+        
+        # Extract correlations
+        correlations = []
+        for item in corr_data.get("numeric_correlations", []) + corr_data.get("categorical_associations", []):
+            # Reconstruct minimal structure expected by BusinessValidationService
+            from types import SimpleNamespace
+            correlations.append(SimpleNamespace(**item))
+        
+        service = BusinessValidationService(
+            correlations=correlations,
+            domain=domain
+        )
+        result = service.run()
+        
+        if result.status == "STOP":
+            raise HTTPException(
+                400,
+                f"Business validation failed: {len(result.conflicts_detected)} unresolved conflicts"
+            )
+        
+        # Save business veto report
+        with open(settings.artifacts_dir / "business_veto_report.json", "w") as f:
+            json.dump(result.model_dump(), f, indent=2)
+        
+        return result
     except HTTPException:
         raise
     except Exception as e:
