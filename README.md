@@ -99,6 +99,9 @@ npm run dev
 - **ReDoc**: http://localhost:8000/api/redoc
 - **Health Check**: http://localhost:8000/health
 
+## Documentation
+- Full docs: see `docs/README.md` for Getting Started, Architecture, Phases, and more.
+
 ## Development Guidelines
 
 ### Phase Implementation
