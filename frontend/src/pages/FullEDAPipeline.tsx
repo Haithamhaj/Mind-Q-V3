@@ -95,23 +95,16 @@ export default function FullEDAPipeline() {
           })
           
         } else if (phase.id === 'phase1') {
-          // Phase 1: Goal & KPIs - needs file + domain
-          const formData = new FormData()
-          formData.append('file', selectedFile)
-          if (domain) formData.append('domain', domain)
-          
-          response = await apiClient.post('/phases/phase1-goal-kpis', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
+          // Phase 1: Goal & KPIs - works on cleaned data from Phase 0
+          // No need to send file again, Phase 0 already processed it
+          response = await apiClient.post('/phases/phase1-goal-kpis', {
+            domain: domain
           })
           
         } else if (phase.id === 'phase2') {
-          // Phase 2: Data Ingestion - needs file  
-          const formData = new FormData()
-          formData.append('file', selectedFile)
-          
-          response = await apiClient.post('/phases/phase2-ingestion', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-          })
+          // Phase 2: Data Ingestion - works on cleaned data from Phase 0
+          // No need to send file again, Phase 0 already processed it
+          response = await apiClient.post('/phases/phase2-ingestion')
           
         } else if (phase.id === 'phase3') {
           // Phase 3: Schema Discovery - works on ingested data
@@ -249,7 +242,7 @@ export default function FullEDAPipeline() {
           // Try to create a simple copy of typed_data.parquet as imputed_data.parquet
           // This allows Phase 6+ to find the required file
           try {
-            const copyResponse = await apiClient.post('/api/v1/simple-copy-for-imputation')
+            await apiClient.post('/api/v1/simple-copy-for-imputation')
             console.log('📁 Created imputed_data.parquet copy for Phase 6+')
           } catch (copyError) {
             console.log('⚠️ Could not create copy - phases 6+ will fail')
@@ -299,20 +292,18 @@ export default function FullEDAPipeline() {
         <Loader2 className="h-4 w-4 animate-spin text-blue-500" /> : 
         <Clock className="h-4 w-4 text-gray-400" />
     }
-    if (result.status === 'success') return <CheckCircle className="h-4 w-4 text-green-500" />
-    if (result.status === 'simulated') return <CheckCircle className="h-4 w-4 text-yellow-500" />
+    if (result?.status === 'success') return <CheckCircle className="h-4 w-4 text-green-500" />
+    if (result?.status === 'simulated') return <CheckCircle className="h-4 w-4 text-yellow-500" />
     return <XCircle className="h-4 w-4 text-red-500" />
   }
 
-  const completedPhases = Object.values(phaseResults).filter(r => r.status === 'success' || r.status === 'simulated').length
-  const failedPhases = Object.values(phaseResults).filter(r => r.status === 'error').length
-  const simulatedPhases = Object.values(phaseResults).filter(r => r.status === 'simulated').length
+  const completedPhases = Object.values(phaseResults).filter(r => r?.status === 'success' || r?.status === 'simulated').length
+  const failedPhases = Object.values(phaseResults).filter(r => r?.status === 'error').length
+  const simulatedPhases = Object.values(phaseResults).filter(r => r?.status === 'simulated').length
 
-  // Add error boundary
-  try {
-    return (
-      <div className="min-h-screen bg-gray-50 p-6">
-        <div className="max-w-6xl mx-auto">
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-6 text-center">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
@@ -455,11 +446,21 @@ export default function FullEDAPipeline() {
                     </Alert>
                   )}
                   
-                  {result?.status === 'success' && (
-                    <div className="mt-2 text-xs text-green-700">
-                      ✅ Completed successfully
-                    </div>
-                  )}
+                        {result?.status === 'success' && (
+                          <div className="mt-2">
+                            <div className="text-xs text-green-700 mb-2">
+                              ✅ Completed successfully
+                            </div>
+                            {result.data && (
+                              <div className="text-xs bg-gray-100 p-2 rounded max-h-32 overflow-y-auto">
+                                <div className="font-semibold mb-1">Results:</div>
+                                <pre className="whitespace-pre-wrap text-xs">
+                                  {JSON.stringify(result.data || {}, null, 2)}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
                   
                   {result?.status === 'simulated' && (
                     <div className="mt-2 text-xs text-yellow-700">
@@ -482,6 +483,819 @@ export default function FullEDAPipeline() {
                   ({completedPhases}/{PHASES.length} phases processed)
                 </span>
               </CardTitle>
+              <div className="mt-4">
+                <h3 className="font-semibold text-lg mb-4">📊 Detailed Results by Phase:</h3>
+                <div className="space-y-4">
+                  {Object.entries(phaseResults).map(([phaseId, result]) => {
+                    const phase = PHASES.find(p => p.id === phaseId)
+                    return (
+                      <div key={phaseId} className="border rounded-lg p-4">
+                        <h4 className="font-semibold text-blue-800 mb-2">
+                          {phase?.name} - {result.status === 'success' ? '✅ Success' : result.status === 'simulated' ? '⚡ Simulated' : '❌ Failed'}
+                        </h4>
+                        {result.data && (
+                          <div className="bg-gray-50 p-3 rounded max-h-64 overflow-y-auto">
+                            <div className="text-xs space-y-3">
+                              {/* Phase 0: Quality Control */}
+                              {phaseId === 'phase0' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-red-600">🔍 Quality Control Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-blue-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className={`font-bold ${result.data.status === 'PASS' ? 'text-green-600' : result.data.status === 'WARN' ? 'text-yellow-600' : 'text-red-600'}`}>{result.data.status}</span>
+                                    </div>
+                                    
+                                    {result.data.missing_report && Object.keys(result.data.missing_report).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-red-600 mb-1">Missing Data Analysis:</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.missing_report)
+                                            .filter(([_, pct]) => (pct as number) > 0)
+                                            .slice(0, 5)
+                                            .map(([col, pct]: [string, any]) => (
+                                            <div key={col} className={`p-1 rounded text-xs ${pct > 0.2 ? 'bg-red-100' : pct > 0.05 ? 'bg-yellow-100' : 'bg-green-100'}`}>
+                                              <strong>{col}:</strong> {(pct * 100).toFixed(1)}% missing
+                                              {pct > 0.2 && <span className="text-red-600 ml-1">⚠️ Critical</span>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.date_issues && Object.keys(result.data.date_issues).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-blue-600 mb-1">Date Issues:</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.date_issues).slice(0, 3).map(([col, issues]: [string, any]) => (
+                                            <div key={col} className="bg-blue-100 p-1 rounded text-xs">
+                                              <strong>{col}:</strong>
+                                              {issues.future_dates > 0 && <span className="ml-1">Future: {issues.future_dates}</span>}
+                                              {issues.inversions > 0 && <span className="ml-1">Inversions: {issues.inversions}</span>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.key_issues && Object.keys(result.data.key_issues).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-purple-600 mb-1">Key Issues:</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.key_issues).slice(0, 3).map(([key, issues]: [string, any]) => (
+                                            <div key={key} className="bg-purple-100 p-1 rounded text-xs">
+                                              <strong>{key}:</strong> {issues}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.warnings && result.data.warnings.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-yellow-600 mb-1">Warnings ({result.data.warnings.length}):</div>
+                                        {result.data.warnings.slice(0, 3).map((warning: string, idx: number) => (
+                                          <div key={idx} className="bg-yellow-100 p-1 rounded text-xs">
+                                            ⚠️ {warning}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.errors && result.data.errors.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-red-600 mb-1">Errors ({result.data.errors.length}):</div>
+                                        {result.data.errors.slice(0, 2).map((error: string, idx: number) => (
+                                          <div key={idx} className="bg-red-100 p-1 rounded text-xs">
+                                            ❌ {error}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.fixes_applied && result.data.fixes_applied.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-green-600 mb-1">Auto-Fixes Applied ({result.data.fixes_applied.length}):</div>
+                                        {result.data.fixes_applied.map((fix: string, idx: number) => (
+                                          <div key={idx} className="bg-green-100 p-1 rounded text-xs">
+                                            ✅ {fix}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 1: Goal & KPIs */}
+                              {phaseId === 'phase1' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-blue-600">🎯 Goal & KPIs Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-blue-50 p-2 rounded">
+                                      <strong>Domain:</strong> <span className="font-bold text-blue-600">{result.data.domain}</span>
+                                    </div>
+                                    
+                                    {result.data.kpis && result.data.kpis.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-blue-600 mb-1">Defined KPIs ({result.data.kpis.length}):</div>
+                                        <div className="grid grid-cols-1 gap-1">
+                                          {result.data.kpis.map((kpi: string, idx: number) => (
+                                            <div key={idx} className="bg-blue-100 p-1 rounded text-xs">
+                                              📊 {kpi}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.compatibility && (
+                                      <div>
+                                        <div className="font-semibold text-blue-600 mb-1">Domain Compatibility:</div>
+                                        <div className="bg-gray-100 p-2 rounded text-xs">
+                                          <div><strong>Status:</strong> <span className={`font-bold ${result.data.compatibility.status === 'OK' ? 'text-green-600' : result.data.compatibility.status === 'WARN' ? 'text-yellow-600' : 'text-red-600'}`}>{result.data.compatibility.status}</span></div>
+                                          <div><strong>Match:</strong> {(result.data.compatibility.match_percentage * 100).toFixed(1)}%</div>
+                                          <div><strong>Message:</strong> {result.data.compatibility.message}</div>
+                                        </div>
+                                        
+                                        {result.data.compatibility.matched_columns && result.data.compatibility.matched_columns.length > 0 && (
+                                          <div className="mt-2">
+                                            <div className="font-semibold text-green-600 mb-1">Matched Columns ({result.data.compatibility.matched_columns.length}):</div>
+                                            <div className="grid grid-cols-2 gap-1">
+                                              {result.data.compatibility.matched_columns.slice(0, 4).map((col: string, idx: number) => (
+                                                <div key={idx} className="bg-green-100 p-1 rounded text-xs">
+                                                  ✅ {col}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {result.data.compatibility.missing_columns && result.data.compatibility.missing_columns.length > 0 && (
+                                          <div className="mt-2">
+                                            <div className="font-semibold text-red-600 mb-1">Missing Columns ({result.data.compatibility.missing_columns.length}):</div>
+                                            <div className="grid grid-cols-2 gap-1">
+                                              {result.data.compatibility.missing_columns.slice(0, 4).map((col: string, idx: number) => (
+                                                <div key={idx} className="bg-red-100 p-1 rounded text-xs">
+                                                  ❌ {col}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {result.data.compatibility.suggestions && Object.keys(result.data.compatibility.suggestions).length > 0 && (
+                                          <div className="mt-2">
+                                            <div className="font-semibold text-yellow-600 mb-1">Alternative Domains:</div>
+                                            <div className="space-y-1">
+                                              {Object.entries(result.data.compatibility.suggestions)
+                                                .filter(([_, score]) => (score as number) > 0)
+                                                .slice(0, 3)
+                                                .map(([domain, score]: [string, any]) => (
+                                                <div key={domain} className="bg-yellow-100 p-1 rounded text-xs">
+                                                  <strong>{domain}:</strong> {(score * 100).toFixed(1)}% match
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 2: Data Ingestion */}
+                              {phaseId === 'phase2' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-green-600">📁 Data Ingestion Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-green-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    
+                                    {result.data.rows && (
+                                      <div className="bg-blue-50 p-2 rounded text-xs">
+                                        <div><strong>Dataset Size:</strong> {result.data.rows.toLocaleString()} rows × {result.data.columns} columns</div>
+                                        <div><strong>File Size:</strong> {result.data.file_size_mb?.toFixed(2)} MB</div>
+                                        <div><strong>Parquet Path:</strong> {result.data.parquet_path}</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.column_names && result.data.column_names.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-green-600 mb-1">Columns ({result.data.column_names.length}):</div>
+                                        <div className="grid grid-cols-2 gap-1">
+                                          {result.data.column_names.slice(0, 6).map((col: string, idx: number) => (
+                                            <div key={idx} className="bg-green-100 p-1 rounded text-xs">
+                                              {col}
+                                            </div>
+                                          ))}
+                                          {result.data.column_names.length > 6 && (
+                                            <div className="bg-gray-100 p-1 rounded text-xs">
+                                              +{result.data.column_names.length - 6} more...
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.compression_ratio && (
+                                      <div className="bg-gray-100 p-2 rounded text-xs">
+                                        <div><strong>Compression Ratio:</strong> {result.data.compression_ratio.toFixed(2)}x</div>
+                                        <div><strong>Ingestion Time:</strong> {result.data.ingestion_time_seconds?.toFixed(2)}s</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 3: Schema Discovery */}
+                              {phaseId === 'phase3' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-purple-600">🔍 Schema Discovery Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-purple-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    
+                                    {result.data.dtypes && Object.keys(result.data.dtypes).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-purple-600 mb-1">Data Types:</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.dtypes).slice(0, 5).map(([col, dtype]: [string, any]) => (
+                                            <div key={col} className="bg-purple-100 p-1 rounded text-xs">
+                                              <strong>{col}:</strong> {dtype}
+                                            </div>
+                                          ))}
+                                          {Object.keys(result.data.dtypes).length > 5 && (
+                                            <div className="bg-gray-100 p-1 rounded text-xs">
+                                              +{Object.keys(result.data.dtypes).length - 5} more columns...
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                      {result.data.numeric_columns && (
+                                        <div className="bg-blue-50 p-2 rounded">
+                                          <div className="font-semibold text-blue-600">Numeric:</div>
+                                          <div>{result.data.numeric_columns.length} columns</div>
+                                        </div>
+                                      )}
+                                      
+                                      {result.data.categorical_columns && (
+                                        <div className="bg-green-50 p-2 rounded">
+                                          <div className="font-semibold text-green-600">Categorical:</div>
+                                          <div>{result.data.categorical_columns.length} columns</div>
+                                        </div>
+                                      )}
+                                      
+                                      {result.data.datetime_columns && (
+                                        <div className="bg-yellow-50 p-2 rounded">
+                                          <div className="font-semibold text-yellow-600">DateTime:</div>
+                                          <div>{result.data.datetime_columns.length} columns</div>
+                                        </div>
+                                      )}
+                                      
+                                      {result.data.id_columns && (
+                                        <div className="bg-red-50 p-2 rounded">
+                                          <div className="font-semibold text-red-600">ID Columns:</div>
+                                          <div>{result.data.id_columns.length} columns</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                    
+                                    {result.data.violations_pct !== undefined && (
+                                      <div className="bg-gray-100 p-2 rounded text-xs">
+                                        <div><strong>Schema Violations:</strong> {result.data.violations_pct.toFixed(2)}%</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.warnings && result.data.warnings.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-yellow-600 mb-1">Warnings:</div>
+                                        {result.data.warnings.slice(0, 2).map((warning: string, idx: number) => (
+                                          <div key={idx} className="bg-yellow-100 p-1 rounded text-xs">
+                                            ⚠️ {warning}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 4: Data Profiling */}
+                              {phaseId === 'phase4' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-orange-600">📊 Data Profiling Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-orange-50 p-2 rounded">
+                                      <strong>Dataset Size:</strong> {result.data.total_rows?.toLocaleString()} rows × {result.data.total_columns} columns
+                                    </div>
+                                    
+                                    {result.data.memory_usage_mb && (
+                                      <div className="bg-gray-100 p-2 rounded text-xs">
+                                        <strong>Memory Usage:</strong> {result.data.memory_usage_mb.toFixed(2)} MB
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.missing_summary && (
+                                      <div className="bg-red-50 p-2 rounded text-xs">
+                                        <div><strong>Missing Data:</strong> {result.data.missing_summary.total_missing?.toLocaleString()} values ({(result.data.missing_summary.missing_percentage || 0).toFixed(1)}%)</div>
+                                        <div><strong>Complete Rows:</strong> {result.data.missing_summary.complete_rows?.toLocaleString()}</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.numeric_summary && Object.keys(result.data.numeric_summary).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-orange-600 mb-1">Numeric Columns ({Object.keys(result.data.numeric_summary).length}):</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.numeric_summary).slice(0, 4).map(([col, stats]: [string, any]) => (
+                                            <div key={col} className="bg-orange-100 p-1 rounded text-xs">
+                                              <strong>{col}:</strong>
+                                              <div className="ml-2 text-xs">
+                                                Mean: {typeof stats.mean === 'number' ? stats.mean.toFixed(2) : 'N/A'} | 
+                                                Std: {typeof stats.std === 'number' ? stats.std.toFixed(2) : 'N/A'} | 
+                                                Min: {typeof stats.min === 'number' ? stats.min.toFixed(2) : 'N/A'} | 
+                                                Max: {typeof stats.max === 'number' ? stats.max.toFixed(2) : 'N/A'}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.categorical_summary && Object.keys(result.data.categorical_summary).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-orange-600 mb-1">Categorical Columns ({Object.keys(result.data.categorical_summary).length}):</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.categorical_summary).slice(0, 4).map(([col, stats]: [string, any]) => (
+                                            <div key={col} className="bg-orange-100 p-1 rounded text-xs">
+                                              <strong>{col}:</strong>
+                                              <div className="ml-2 text-xs">
+                                                Unique: {stats.unique_values} | 
+                                                Most Common: {stats.most_common_value} ({stats.most_common_count} times)
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.top_issues && result.data.top_issues.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-red-600 mb-1">Top Quality Issues ({result.data.top_issues.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.top_issues.slice(0, 3).map((issue: any, idx: number) => (
+                                            <div key={idx} className={`p-1 rounded text-xs ${issue.severity === 'critical' ? 'bg-red-100' : issue.severity === 'high' ? 'bg-orange-100' : 'bg-yellow-100'}`}>
+                                              <strong>{issue.column}:</strong> {issue.description} ({issue.affected_rows} rows, {issue.affected_pct.toFixed(1)}%)
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.correlation_preview && Object.keys(result.data.correlation_preview).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-blue-600 mb-1">Top Correlations:</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.correlation_preview).slice(0, 3).map(([pair, corr]: [string, any]) => (
+                                            <div key={pair} className="bg-blue-100 p-1 rounded text-xs">
+                                              <strong>{pair}:</strong> {typeof corr === 'number' ? corr.toFixed(3) : corr}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 5: Missing Data Analysis */}
+                              {phaseId === 'phase5' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-red-600">❌ Missing Data Analysis:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-red-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    
+                                    {result.data.record_completeness !== undefined && (
+                                      <div className="bg-blue-50 p-2 rounded text-xs">
+                                        <div><strong>Record Completeness:</strong> {(result.data.record_completeness * 100).toFixed(1)}%</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.decisions && result.data.decisions.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-red-600 mb-1">Imputation Decisions ({result.data.decisions.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.decisions.slice(0, 4).map((decision: any, idx: number) => (
+                                            <div key={idx} className="bg-red-100 p-1 rounded text-xs">
+                                              <strong>{decision.column}:</strong> {decision.method}
+                                              <div className="ml-2 text-xs">
+                                                {decision.missing_before} → {decision.missing_after} missing | {decision.reason}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.validation && Object.keys(result.data.validation).length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-blue-600 mb-1">Validation Results:</div>
+                                        <div className="space-y-1">
+                                          {Object.entries(result.data.validation).slice(0, 3).map(([col, metrics]: [string, any]) => (
+                                            <div key={col} className="bg-blue-100 p-1 rounded text-xs">
+                                              <strong>{col}:</strong>
+                                              <div className="ml-2 text-xs">
+                                                PSI: {metrics.psi?.toFixed(3)} | KS: {metrics.ks_statistic?.toFixed(3)} | 
+                                                <span className={`ml-1 ${metrics.passed ? 'text-green-600' : 'text-red-600'}`}>
+                                                  {metrics.passed ? '✅ Passed' : '❌ Failed'}
+                                                </span>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.warnings && result.data.warnings.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-yellow-600 mb-1">Warnings ({result.data.warnings.length}):</div>
+                                        {result.data.warnings.slice(0, 2).map((warning: string, idx: number) => (
+                                          <div key={idx} className="bg-yellow-100 p-1 rounded text-xs">
+                                            ⚠️ {warning}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.status && (
+                                      <div className={`p-2 rounded text-xs ${result.data.status === 'PASS' ? 'bg-green-50' : result.data.status === 'WARN' ? 'bg-yellow-50' : 'bg-red-50'}`}>
+                                        <strong>Final Status:</strong> <span className={`font-bold ${result.data.status === 'PASS' ? 'text-green-600' : result.data.status === 'WARN' ? 'text-yellow-600' : 'text-red-600'}`}>{result.data.status}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 6: Standardization */}
+                              {phaseId === 'phase6' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-indigo-600">🔧 Standardization Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-indigo-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    {result.data.standardization_info && (
+                                      <div className="space-y-1 text-xs">
+                                        <div><strong>Cleaned columns:</strong> {result.data.standardization_info.cleaned_columns}</div>
+                                        <div><strong>Standardized formats:</strong> {result.data.standardization_info.standardized_formats}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 7: Feature Engineering */}
+                              {phaseId === 'phase7' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-teal-600">⚙️ Feature Engineering Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-teal-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    {result.data.features_info && (
+                                      <div className="space-y-1 text-xs">
+                                        <div><strong>New features created:</strong> {result.data.features_info.new_features_count}</div>
+                                        <div><strong>Feature types:</strong> {result.data.features_info.feature_types?.join(', ')}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 7.5: Encoding & Scaling */}
+                              {phaseId === 'phase7_5' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-cyan-600">🔢 Encoding & Scaling Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-cyan-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    
+                                    {result.data.encoding_configs && result.data.encoding_configs.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-cyan-600 mb-1">Encoding Configurations ({result.data.encoding_configs.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.encoding_configs.slice(0, 4).map((config: any, idx: number) => (
+                                            <div key={idx} className="bg-cyan-100 p-1 rounded text-xs">
+                                              <strong>{config.column}:</strong> {config.method}
+                                              <div className="ml-2 text-xs">
+                                                Cardinality: {config.cardinality} | {config.reason}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.scaling_config && (
+                                      <div>
+                                        <div className="font-semibold text-cyan-600 mb-1">Scaling Configuration:</div>
+                                        <div className="bg-cyan-100 p-2 rounded text-xs">
+                                          <div><strong>Method:</strong> {result.data.scaling_config.method}</div>
+                                          <div><strong>Columns:</strong> {result.data.scaling_config.columns?.length || 0} columns</div>
+                                          <div><strong>Reason:</strong> {result.data.scaling_config.reason}</div>
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.artifacts_saved && result.data.artifacts_saved.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-green-600 mb-1">Artifacts Saved ({result.data.artifacts_saved.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.artifacts_saved.map((artifact: string, idx: number) => (
+                                            <div key={idx} className="bg-green-100 p-1 rounded text-xs">
+                                              💾 {artifact}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.encoded_columns && result.data.encoded_columns.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-cyan-600 mb-1">Encoded Columns ({result.data.encoded_columns.length}):</div>
+                                        <div className="grid grid-cols-2 gap-1">
+                                          {result.data.encoded_columns.slice(0, 6).map((col: string, idx: number) => (
+                                            <div key={idx} className="bg-cyan-100 p-1 rounded text-xs">
+                                              🔢 {col}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.scaled_columns && result.data.scaled_columns.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-cyan-600 mb-1">Scaled Columns ({result.data.scaled_columns.length}):</div>
+                                        <div className="grid grid-cols-2 gap-1">
+                                          {result.data.scaled_columns.slice(0, 6).map((col: string, idx: number) => (
+                                            <div key={idx} className="bg-cyan-100 p-1 rounded text-xs">
+                                              📏 {col}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 8: Data Merging */}
+                              {phaseId === 'phase8' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-pink-600">🔗 Data Merging Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-pink-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    {result.data.merge_info && (
+                                      <div className="space-y-1 text-xs">
+                                        <div><strong>Merged datasets:</strong> {result.data.merge_info.merged_datasets}</div>
+                                        <div><strong>Final rows:</strong> {result.data.merge_info.final_rows?.toLocaleString()}</div>
+                                        <div><strong>Duplicates found:</strong> {result.data.merge_info.duplicates_found}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 9: Correlation Analysis */}
+                              {phaseId === 'phase9' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-green-600">🔗 Correlation Analysis Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-green-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    
+                                    {result.data.total_tests && (
+                                      <div className="bg-gray-100 p-2 rounded text-xs">
+                                        <div><strong>Total Tests:</strong> {result.data.total_tests}</div>
+                                        <div><strong>FDR Applied:</strong> {result.data.fdr_applied ? 'Yes' : 'No'}</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.numeric_correlations && result.data.numeric_correlations.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-green-600 mb-1">Numeric Correlations ({result.data.numeric_correlations.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.numeric_correlations.slice(0, 4).map((corr: any, idx: number) => (
+                                            <div key={idx} className="bg-green-100 p-1 rounded text-xs">
+                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong>
+                                              <div className="ml-2 text-xs">
+                                                {corr.method}: {corr.correlation.toFixed(3)} | p-value: {corr.p_value.toFixed(3)} | n: {corr.n}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.categorical_associations && result.data.categorical_associations.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-blue-600 mb-1">Categorical Associations ({result.data.categorical_associations.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.categorical_associations.slice(0, 3).map((assoc: any, idx: number) => (
+                                            <div key={idx} className="bg-blue-100 p-1 rounded text-xs">
+                                              <strong>{assoc.feature1} &harr; {assoc.feature2}:</strong>
+                                              <div className="ml-2 text-xs">
+                                                {assoc.method}: {assoc.correlation.toFixed(3)} | p-value: {assoc.p_value.toFixed(3)} | n: {assoc.n}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.strong_correlations && result.data.strong_correlations.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-red-600 mb-1">Strong Correlations (|r| &gt; 0.7):</div>
+                                        <div className="space-y-1">
+                                          {result.data.strong_correlations.slice(0, 3).map((corr: any, idx: number) => (
+                                            <div key={idx} className="bg-red-100 p-1 rounded text-xs">
+                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong> {corr.correlation.toFixed(3)}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.moderate_correlations && result.data.moderate_correlations.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-yellow-600 mb-1">Moderate Correlations (0.3 &lt; |r| &le; 0.7):</div>
+                                        <div className="space-y-1">
+                                          {result.data.moderate_correlations.slice(0, 3).map((corr: any, idx: number) => (
+                                            <div key={idx} className="bg-yellow-100 p-1 rounded text-xs">
+                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong> {corr.correlation.toFixed(3)}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 9.5: Business Validation */}
+                              {phaseId === 'phase9_5' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-yellow-600">✅ Business Validation Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-yellow-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className={`font-bold ${result.data.status === 'PASS' ? 'text-green-600' : result.data.status === 'WARN' ? 'text-yellow-600' : 'text-red-600'}`}>{result.data.status}</span>
+                                    </div>
+                                    
+                                    {result.data.conflicts_detected && result.data.conflicts_detected.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-red-600 mb-1">Business Conflicts Detected ({result.data.conflicts_detected.length}):</div>
+                                        <div className="space-y-1">
+                                          {result.data.conflicts_detected.slice(0, 3).map((conflict: any, idx: number) => (
+                                            <div key={idx} className={`p-1 rounded text-xs ${conflict.conflict_severity === 'high' ? 'bg-red-100' : conflict.conflict_severity === 'medium' ? 'bg-yellow-100' : 'bg-blue-100'}`}>
+                                              <strong>{conflict.feature1} ↔ {conflict.feature2}:</strong>
+                                              <div className="ml-2 text-xs">
+                                                Observed: {conflict.observed_correlation.toFixed(3)} | Expected: {conflict.expected_relationship} | 
+                                                Severity: {conflict.conflict_severity} | Resolution: {conflict.resolution}
+                                              </div>
+                                              {conflict.llm_hypothesis && (
+                                                <div className="ml-2 text-xs mt-1 bg-gray-50 p-1 rounded">
+                                                  <strong>LLM Hypothesis:</strong> {conflict.llm_hypothesis}
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.llm_hypotheses_generated !== undefined && (
+                                      <div className="bg-blue-50 p-2 rounded text-xs">
+                                        <div><strong>LLM Hypotheses Generated:</strong> {result.data.llm_hypotheses_generated}</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.conflicts_detected && result.data.conflicts_detected.length === 0 && (
+                                      <div className="bg-green-50 p-2 rounded text-xs">
+                                        <div><strong>✅ No Business Conflicts Detected</strong></div>
+                                        <div>All correlations align with domain expectations</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.resolution_summary && (
+                                      <div className="bg-gray-100 p-2 rounded text-xs">
+                                        <div><strong>Resolution Summary:</strong></div>
+                                        <div>Accepted: {result.data.resolution_summary.accepted || 0} | Vetoed: {result.data.resolution_summary.vetoed || 0} | Pending: {result.data.resolution_summary.pending || 0}</div>
+                                      </div>
+                                    )}
+                                    
+                                    {result.data.domain_insights && result.data.domain_insights.length > 0 && (
+                                      <div>
+                                        <div className="font-semibold text-purple-600 mb-1">Domain Insights:</div>
+                                        <div className="space-y-1">
+                                          {result.data.domain_insights.slice(0, 2).map((insight: string, idx: number) => (
+                                            <div key={idx} className="bg-purple-100 p-1 rounded text-xs">
+                                              💡 {insight}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 10: Packaging */}
+                              {phaseId === 'phase10' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-gray-600">📦 Data Packaging Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-gray-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    {result.data?.packaging_info && (
+                                      <div className="space-y-1 text-xs">
+                                        <div><strong>Files created:</strong> {result.data.packaging_info.files_created}</div>
+                                        <div><strong>Total size:</strong> {result.data.packaging_info.total_size_mb?.toFixed(2)} MB</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 11: Advanced Analysis */}
+                              {phaseId === 'phase11' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-purple-600">🔬 Advanced Analysis Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-purple-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    {result.data.advanced_analysis && (
+                                      <div className="space-y-1 text-xs">
+                                        <div><strong>Analysis type:</strong> {result.data.advanced_analysis.analysis_type}</div>
+                                        <div><strong>Insights found:</strong> {result.data.advanced_analysis.insights_count}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Phase 12: Monitoring */}
+                              {phaseId === 'phase12' && (
+                                <div>
+                                  <div className="font-semibold mb-2 text-blue-600">📊 Monitoring Setup Results:</div>
+                                  <div className="space-y-2">
+                                    <div className="bg-blue-50 p-2 rounded">
+                                      <strong>Status:</strong> <span className="font-bold text-green-600">Success</span>
+                                    </div>
+                                    {result.data.monitoring_info && (
+                                      <div className="space-y-1 text-xs">
+                                        <div><strong>Monitoring enabled:</strong> {result.data.monitoring_info.monitoring_enabled ? 'Yes' : 'No'}</div>
+                                        <div><strong>Alerts configured:</strong> {result.data.monitoring_info.alerts_configured}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {/* Fallback for unknown phases */}
+                              {!['phase0', 'phase1', 'phase2', 'phase3', 'phase4', 'phase5', 'phase6', 'phase7', 'phase7_5', 'phase8', 'phase9', 'phase9_5', 'phase10', 'phase11', 'phase12'].includes(phaseId) && (
+                                <div>
+                                  <div className="font-semibold mb-2">📄 Raw Results:</div>
+                                  <pre className="whitespace-pre-wrap text-xs bg-gray-100 p-2 rounded">
+                                    {JSON.stringify(result.data || {}, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {result.error && (
+                          <div className="bg-red-50 p-3 rounded text-red-700 text-sm">
+                            Error: {result.error || 'Unknown error occurred'}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="mb-4 p-4 bg-blue-50 rounded-lg">
@@ -534,7 +1348,7 @@ export default function FullEDAPipeline() {
               <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <h4 className="text-blue-800 font-semibold mb-2">🎯 EDA Pipeline Demo Complete!</h4>
                 <div className="text-sm text-blue-700 space-y-1">
-                  <p>✅ <strong>Real Analysis:</strong> {Object.values(phaseResults).filter(r => r.status === 'success').length} phases with actual data processing</p>
+                  <p>✅ <strong>Real Analysis:</strong> {Object.values(phaseResults).filter(r => r?.status === 'success').length} phases with actual data processing</p>
                   <p>🎭 <strong>Demo Phases:</strong> {simulatedPhases} phases simulated for demonstration</p>
                   <p>📊 This demonstrates the complete 18-phase EDA workflow you would get with a fully configured backend.</p>
                   {failedPhases > 0 && (
@@ -548,21 +1362,4 @@ export default function FullEDAPipeline() {
       </div>
     </div>
   )
-  } catch (error) {
-    console.error('Error rendering FullEDAPipeline:', error)
-    return (
-      <div className="min-h-screen bg-gray-50 p-6 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Something went wrong!</h1>
-          <p className="text-gray-600 mb-4">Please refresh the page and try again.</p>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Refresh Page
-          </button>
-        </div>
-      </div>
-    )
-  }
 }

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     spec_path: Path = base_dir / "spec" / "master_eda_spec_v1.2.2.json"
     
     # CORS
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"]
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175"]
     
     # Limits
     max_file_size_mb: int = 500

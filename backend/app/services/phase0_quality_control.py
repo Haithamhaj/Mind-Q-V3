@@ -70,6 +70,9 @@ class QualityControlService:
         # Determine final status
         status = self._evaluate_status()
         
+        # Save cleaned data for next phases
+        self._save_cleaned_data()
+        
         return QualityControlResult(
             status=status,
             missing_report=missing_report,
@@ -265,4 +268,14 @@ class QualityControlService:
             "warnings_count": len(self.warnings),
             "status": self._evaluate_status()
         }
+    
+    def _save_cleaned_data(self):
+        """Save cleaned data for next phases"""
+        try:
+            from ..config import settings
+            cleaned_path = settings.artifacts_dir / "cleaned_data.parquet"
+            self.df.to_parquet(cleaned_path, compression='zstd')
+            self.fixes_applied.append(f"Saved cleaned data to {cleaned_path}")
+        except Exception as e:
+            self.warnings.append(f"Failed to save cleaned data: {str(e)}")
 

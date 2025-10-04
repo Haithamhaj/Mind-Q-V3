@@ -355,21 +355,16 @@ async def list_processed_files():
 
 @router.post("/phase1-goal-kpis", response_model=GoalKPIsResult)
 async def run_phase1(
-    file: UploadFile = File(...),
-    domain: Optional[str] = Form(None)
+    domain: Optional[str] = None
 ):
     """Phase 1: Goal & KPIs with domain compatibility check"""
     try:
-        # Quick column extraction with CSV recovery
-        if file.filename.endswith('.csv'):
-            try:
-                df_sample = pd.read_csv(file.file, nrows=10)
-            except pd.errors.ParserError:
-                file.file.seek(0)
-                df_sample = pd.read_csv(file.file, nrows=10, on_bad_lines='skip', engine='python')
-        else:
-            df_sample = pd.read_excel(file.file, nrows=10)
+        # Read cleaned data from Phase 0
+        cleaned_data_path = settings.artifacts_dir / "cleaned_data.parquet"
+        if not cleaned_data_path.exists():
+            raise HTTPException(400, "No cleaned data found. Run Phase 0 first.")
         
+        df_sample = pd.read_parquet(cleaned_data_path, nrows=10)
         columns = df_sample.columns.tolist()
         
         # Run Phase 1
@@ -390,24 +385,36 @@ async def run_phase1(
 
 
 @router.post("/phase2-ingestion", response_model=IngestionResult)
-async def run_phase2(file: UploadFile = File(...)):
+async def run_phase2():
     """Phase 2: Ingestion & Landing to Parquet"""
     try:
-        # Save uploaded file temporarily
-        temp_path = settings.artifacts_dir / file.filename
-        with open(temp_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+        # Read cleaned data from Phase 0
+        cleaned_data_path = settings.artifacts_dir / "cleaned_data.parquet"
+        if not cleaned_data_path.exists():
+            raise HTTPException(400, "No cleaned data found. Run Phase 0 first.")
         
-        # Run Phase 2 with CSV recovery built-in
-        service = IngestionService(
-            file_path=temp_path,
-            artifacts_dir=settings.artifacts_dir
+        # Phase 2: Convert cleaned data to ingested format
+        df = pd.read_parquet(cleaned_data_path)
+        
+        # Create ingestion result
+        result = IngestionResult(
+            rows=len(df),
+            columns=len(df.columns),
+            column_names=df.columns.tolist(),
+            file_size_mb=cleaned_data_path.stat().st_size / (1024 * 1024),
+            parquet_path=str(settings.artifacts_dir / "ingested_data.parquet"),
+            message="Data successfully ingested from cleaned data",
+            status="PASS",
+            compression_ratio=1.0,
+            ingestion_time_seconds=0.0,
+            source_file="cleaned_data.parquet"
         )
-        df, result = service.run()
         
-        # Clean up temp file
-        temp_path.unlink()
+        # Save ingested data
+        df.to_parquet(
+            settings.artifacts_dir / "ingested_data.parquet",
+            compression='zstd'
+        )
         
         return result
     
@@ -420,7 +427,7 @@ async def run_phase3():
     """Phase 3: Schema & Dtypes (runs on ingested Parquet)"""
     try:
         # Load ingested Parquet
-        parquet_path = settings.artifacts_dir / "raw_ingested.parquet"
+        parquet_path = settings.artifacts_dir / "ingested_data.parquet"
         if not parquet_path.exists():
             raise HTTPException(
                 status_code=400,
@@ -495,12 +502,9 @@ async def run_phase4():
         
         df = pd.read_parquet(data_path)
         
-        # Mind-Q-V3: Sample large datasets to prevent timeout
+        # Use full dataset for ML accuracy
         original_size = len(df)
-        if original_size > 30000:
-            sample_size = 30000
-            df = df.sample(n=sample_size, random_state=42)
-            print(f"🔧 Phase 4 API: Sampling {sample_size} from {original_size} rows (timeout prevention)")
+        print(f"🔬 Phase 4: Analyzing full dataset ({original_size:,} rows) for ML accuracy")
         
         # Run Phase 4
         service = ProfilingService(df=df)
@@ -609,11 +613,11 @@ async def run_phase10_5(
 async def run_phase11():
     """Phase 11: Advanced Exploration"""
     try:
-        train_path = settings.artifacts_dir / "train.parquet"
-        if not train_path.exists():
-            raise HTTPException(400, "No train data found. Run Phase 10.5 first.")
+        data_path = settings.artifacts_dir / "merged_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No merged data found. Run Phase 8 first.")
         
-        df_train = pd.read_parquet(train_path)
+        df_train = pd.read_parquet(data_path)
         
         service = AdvancedExplorationService(df=df_train)
         result = service.run(settings.artifacts_dir)
@@ -672,11 +676,11 @@ async def run_phase11_5(
 async def run_phase13():
     """Phase 13: Monitoring & Drift Setup"""
     try:
-        train_path = settings.artifacts_dir / "train.parquet"
-        if not train_path.exists():
-            raise HTTPException(400, "No train data found.")
+        data_path = settings.artifacts_dir / "merged_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No merged data found. Run Phase 8 first.")
         
-        df_train = pd.read_parquet(train_path)
+        df_train = pd.read_parquet(data_path)
         
         service = MonitoringService(df=df_train)
         result = service.run()
@@ -733,9 +737,9 @@ async def run_phase12():
 async def run_phase8():
     """Phase 8: Merging & Keys"""
     try:
-        data_path = settings.artifacts_dir / "features_data.parquet"
+        data_path = settings.artifacts_dir / "encoded_data.parquet"
         if not data_path.exists():
-            raise HTTPException(400, "No feature data found. Run Phase 7 first.")
+            raise HTTPException(400, "No encoded data found. Run Phase 7.5 first.")
         
         df = pd.read_parquet(data_path)
         
@@ -892,19 +896,16 @@ async def run_phase7_5(
     target_column: Optional[str] = Form(None),
     domain: str = Form("logistics")
 ):
-    """Phase 7.5: Encoding & Scaling (requires split data)"""
+    """Phase 7.5: Encoding & Scaling"""
     try:
-        # Load split data
-        train_path = settings.artifacts_dir / "train.parquet"
-        val_path = settings.artifacts_dir / "validation.parquet"
-        test_path = settings.artifacts_dir / "test.parquet"
+        # Load feature data
+        data_path = settings.artifacts_dir / "features_data.parquet"
+        if not data_path.exists():
+            raise HTTPException(400, "No feature data found. Run Phase 7 first.")
         
-        if not train_path.exists():
-            raise HTTPException(400, "No split data found. Run Phase 10.5 (split) first.")
-        
-        df_train = pd.read_parquet(train_path)
-        df_val = pd.read_parquet(val_path) if val_path.exists() else None
-        df_test = pd.read_parquet(test_path) if test_path.exists() else None
+        df_train = pd.read_parquet(data_path)
+        df_val = None
+        df_test = None
         
         service = EncodingScalingService(
             df_train=df_train,
@@ -917,11 +918,11 @@ async def run_phase7_5(
         df_train_enc, df_val_enc, df_test_enc, result = service.run(settings.artifacts_dir)
         
         # Save encoded data
-        df_train_enc.to_parquet(settings.artifacts_dir / "train_encoded.parquet")
+        df_train_enc.to_parquet(settings.artifacts_dir / "encoded_data.parquet", compression='zstd')
         if df_val_enc is not None:
-            df_val_enc.to_parquet(settings.artifacts_dir / "val_encoded.parquet")
+            df_val_enc.to_parquet(settings.artifacts_dir / "val_encoded.parquet", compression='zstd')
         if df_test_enc is not None:
-            df_test_enc.to_parquet(settings.artifacts_dir / "test_encoded.parquet")
+            df_test_enc.to_parquet(settings.artifacts_dir / "test_encoded.parquet", compression='zstd')
         
         return result
     except Exception as e:
