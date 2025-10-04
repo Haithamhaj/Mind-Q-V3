@@ -18,15 +18,23 @@ export default function Home() {
           <p className="text-sm text-gray-500 mb-6">Version 1.2.2</p>
           
           <div className="space-y-4">
+            <Link to="/full-pipeline">
+              <Button className="w-full" size="lg">
+                🚀 Complete EDA Pipeline (18 Phases)
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+            
             <Link to="/quality-control">
-              <Button className="w-full">
-                Start Quality Control Analysis
+              <Button variant="outline" className="w-full">
+                Quick Start: Quality Control Only
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </Link>
             
             <div className="text-sm text-gray-500">
-              <p>Upload your dataset to begin automated quality control checks</p>
+              <p><strong>Complete Pipeline</strong>: All 18 phases from quality control to monitoring</p>
+              <p><strong>Quick Start</strong>: Quality control + missing data analysis only</p>
             </div>
           </div>
         </div>
