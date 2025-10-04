@@ -16,6 +16,7 @@ interface QCResult {
   key_issues: Record<string, any>
   warnings: string[]
   errors: string[]
+  fixes_applied?: string[]  // Auto-fixes applied by Mind-Q-V3
   timestamp: string
 }
 

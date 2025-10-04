@@ -82,11 +82,37 @@ class IngestionService:
         return df, result
     
     def _read_file(self) -> pd.DataFrame:
+        """Read file with Mind-Q CSV recovery if needed"""
         """Read CSV or Excel file"""
         suffix = self.file_path.suffix.lower()
         
         if suffix == '.csv':
-            df = pd.read_csv(self.file_path, low_memory=False)
+            try:
+                # Try normal CSV parsing first
+                df = pd.read_csv(self.file_path, low_memory=False)
+            except pd.errors.ParserError as e:
+                print(f"🔧 Phase 2 Ingestion: CSV parsing failed, applying Mind-Q recovery...")
+                
+                # Mind-Q V3 CSV Recovery for Ingestion
+                recovery_attempts = [
+                    lambda: pd.read_csv(self.file_path, on_bad_lines='skip', engine='python', low_memory=False),
+                    lambda: pd.read_csv(self.file_path, quoting=1, on_bad_lines='skip', engine='python', low_memory=False),
+                    lambda: pd.read_csv(self.file_path, sep=',', skipinitialspace=True, on_bad_lines='skip', low_memory=False),
+                ]
+                
+                df = None
+                for i, strategy in enumerate(recovery_attempts):
+                    try:
+                        df = strategy()
+                        if len(df) > 0:
+                            print(f"✅ Phase 2 CSV Recovery: Strategy {i+1} successful")
+                            print(f"📊 Recovered {len(df)} rows for ingestion")
+                            break
+                    except Exception:
+                        continue
+                
+                if df is None or len(df) == 0:
+                    raise ValueError(f"Mind-Q CSV recovery failed in Phase 2: {str(e)}")
         elif suffix in ['.xlsx', '.xls']:
             df = pd.read_excel(self.file_path)
         else:

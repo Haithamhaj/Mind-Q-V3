@@ -74,6 +74,7 @@ class MergingService:
         dup_pct = float(dup_count) / float(len(df)) if len(df) > 0 else 0.0
         
         if dup_pct > 0:
+            # Restore original thresholds as designed
             action = "stopped" if dup_pct > 0.10 else "kept_latest" if dup_pct > 0.03 else "flagged"
             
             self.issues.append(MergingIssue(

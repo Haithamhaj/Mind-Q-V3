@@ -17,6 +17,7 @@ class QualityControlResult(BaseModel):
     key_issues: Dict[str, Any]
     warnings: List[str]
     errors: List[str]
+    fixes_applied: List[str] = []  # CSV and data fixes applied
     timestamp: str
 
 
@@ -40,17 +41,22 @@ class QualityControlService:
         self.key_columns = key_columns or []
         self.warnings = []
         self.errors = []
+        self.fixes_applied = []  # Track automatic fixes applied
     
     def run(self) -> QualityControlResult:
         """
-        Execute all quality control checks
+        Execute all quality control checks and apply automatic fixes
         
         Returns:
             QualityControlResult with status and detailed reports
         """
-        # Reset warnings and errors for each run
+        # Reset warnings, errors, and fixes for each run
         self.warnings = []
         self.errors = []
+        self.fixes_applied = []
+        
+        # Auto-fix common data quality issues
+        self._auto_fix_data_issues()
         
         # 1. Missing data scan
         missing_report = self._missing_scan()
@@ -71,6 +77,7 @@ class QualityControlService:
             key_issues=key_issues,
             warnings=self.warnings,
             errors=self.errors,
+            fixes_applied=self.fixes_applied,
             timestamp=datetime.utcnow().isoformat()
         )
     
@@ -196,6 +203,38 @@ class QualityControlService:
             issues[key_col] = col_issues
         
         return issues
+    
+    def _auto_fix_data_issues(self):
+        """Automatically fix common data quality issues"""
+        original_shape = self.df.shape
+        
+        # Fix 1: Remove completely empty rows
+        empty_rows_before = self.df.isnull().all(axis=1).sum()
+        if empty_rows_before > 0:
+            self.df = self.df.dropna(how='all')
+            self.fixes_applied.append(f"Removed {empty_rows_before} completely empty rows")
+        
+        # Fix 2: Remove completely empty columns  
+        empty_cols_before = self.df.isnull().all(axis=0).sum()
+        if empty_cols_before > 0:
+            self.df = self.df.dropna(how='all', axis=1)
+            self.fixes_applied.append(f"Removed {empty_cols_before} completely empty columns")
+        
+        # Fix 3: Clean column names
+        original_cols = list(self.df.columns)
+        self.df.columns = [str(col).strip().replace('\n', ' ').replace('\r', '') for col in self.df.columns]
+        if list(self.df.columns) != original_cols:
+            self.fixes_applied.append("Cleaned column names (removed newlines and extra spaces)")
+        
+        # Fix 4: Remove duplicate rows
+        dup_rows_before = self.df.duplicated().sum()
+        if dup_rows_before > 0:
+            self.df = self.df.drop_duplicates()
+            self.fixes_applied.append(f"Removed {dup_rows_before} completely duplicate rows")
+        
+        if self.fixes_applied:
+            new_shape = self.df.shape
+            self.warnings.append(f"Auto-fixes applied: {original_shape} → {new_shape} ({len(self.fixes_applied)} fixes)")
     
     def _evaluate_status(self) -> str:
         """

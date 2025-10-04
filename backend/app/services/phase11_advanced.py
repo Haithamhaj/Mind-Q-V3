@@ -25,17 +25,14 @@ class AdvancedExplorationResult(BaseModel):
 
 
 class AdvancedExplorationService:
-    def __init__(self, df: pd.DataFrame, sample_threshold: int = 1000000, random_state: int = 42):
-        self.df = df
-        self.sample_threshold = sample_threshold
+    def __init__(self, df: pd.DataFrame, random_state: int = 42):
+        self.df = df  # Always use full dataset for ML accuracy
         self.random_state = random_state
         
-        # Sample if too large
-        if len(df) > sample_threshold:
-            self.df = df.sample(n=sample_threshold, random_state=random_state)
+        print(f"🔬 Phase 11: Advanced exploration on full dataset ({len(df):,} rows) for ML accuracy")
     
     def run(self, artifacts_dir) -> AdvancedExplorationResult:
-        """Execute Phase 11: Advanced Exploration"""
+        """Execute Phase 11: Advanced Exploration on full dataset"""
         
         # Get numeric features only
         numeric_cols = self.df.select_dtypes(include=[np.number]).columns

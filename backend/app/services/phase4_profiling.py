@@ -35,19 +35,25 @@ class ProfilingService:
         self.issues: List[DataQualityIssue] = []
     
     def run(self) -> ProfilingResult:
-        """Execute Phase 4: Profiling"""
-        # Basic stats
-        memory_mb = self.df.memory_usage(deep=True).sum() / (1024**2)
+        """Execute Phase 4: Profiling with full dataset for ML accuracy"""
+        # Use full dataset for accurate ML preparation
+        original_size = len(self.df)
+        df_sample = self.df  # Always use full dataset
         
-        # Numeric summary
-        numeric_cols = self.df.select_dtypes(include=[np.number]).columns
+        print(f"🔬 Phase 4: Analyzing full dataset ({original_size:,} rows) for ML accuracy")
+        
+        # Basic stats on full dataset
+        memory_mb = df_sample.memory_usage(deep=True).sum() / (1024**2)
+        
+        # Numeric summary on full dataset
+        numeric_cols = df_sample.select_dtypes(include=[np.number]).columns
         numeric_summary = self._profile_numeric(numeric_cols)
         
-        # Categorical summary
-        cat_cols = self.df.select_dtypes(include=['object', 'category', 'string']).columns
+        # Categorical summary on full dataset
+        cat_cols = df_sample.select_dtypes(include=['object', 'category', 'string']).columns
         categorical_summary = self._profile_categorical(cat_cols)
         
-        # Missing data summary
+        # Missing data summary on full dataset
         missing_summary = self._profile_missing()
         
         # Correlation preview (top 5 pairs)
