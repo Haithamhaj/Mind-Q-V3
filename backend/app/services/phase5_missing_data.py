@@ -160,9 +160,19 @@ class MissingDataService:
         
         elif method == "mode":
             mode_val = df[col].mode()[0] if len(df[col].mode()) > 0 else "Unknown"
+            # Handle categorical columns properly
+            if df[col].dtype.name == 'category':
+                # Add 'Unknown' to categories if not present
+                if 'Unknown' not in df[col].cat.categories:
+                    df[col] = df[col].cat.add_categories(['Unknown'])
             df[col] = df[col].fillna(mode_val)
         
         elif method == "group_mode":
+            # Handle categorical columns properly
+            if df[col].dtype.name == 'category':
+                if 'Unknown' not in df[col].cat.categories:
+                    df[col] = df[col].cat.add_categories(['Unknown'])
+            
             df[col] = df.groupby(self.group_col)[col].transform(
                 lambda x: x.fillna(x.mode()[0] if len(x.mode()) > 0 else "Unknown")
             )
@@ -170,6 +180,10 @@ class MissingDataService:
             df[col].fillna(global_mode, inplace=True)
         
         elif method == "unknown":
+            # Handle categorical columns properly
+            if df[col].dtype.name == 'category':
+                if 'Unknown' not in df[col].cat.categories:
+                    df[col] = df[col].cat.add_categories(['Unknown'])
             df[col] = df[col].fillna("Unknown")
         
         elif method == "knn":

@@ -40,7 +40,7 @@ class ProfilingService:
         original_size = len(self.df)
         df_sample = self.df  # Always use full dataset
         
-        print(f"🔬 Phase 4: Analyzing full dataset ({original_size:,} rows) for ML accuracy")
+        print(f"Phase 4: Analyzing full dataset ({original_size:,} rows) for ML accuracy")
         
         # Basic stats on full dataset
         memory_mb = df_sample.memory_usage(deep=True).sum() / (1024**2)

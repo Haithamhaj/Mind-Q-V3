@@ -505,7 +505,7 @@ async def run_phase4():
         
         # Use full dataset for ML accuracy
         original_size = len(df)
-        print(f"🔬 Phase 4: Analyzing full dataset ({original_size:,} rows) for ML accuracy")
+        print(f"Phase 4: Analyzing full dataset ({original_size:,} rows) for ML accuracy")
         
         # Run Phase 4
         service = ProfilingService(df=df)
@@ -784,18 +784,35 @@ async def run_phase9():
         if not data_path.exists():
             raise HTTPException(400, "No merged data found. Run Phase 8 first.")
         
-        df = pd.read_parquet(data_path)
+        # Load data with robust error handling
+        try:
+            df = pd.read_parquet(data_path)
+        except Exception as e:
+            raise HTTPException(500, f"Failed to load merged data: {str(e)}")
         
+        # Validate data
+        if df is None or df.empty:
+            raise HTTPException(400, "Merged data is empty or invalid.")
+        
+        # The CorrelationsService now handles data type conversion internally
         service = CorrelationsService(df=df)
         result = service.run()
         
-        # Save correlation matrix
-        with open(settings.artifacts_dir / "correlation_matrix.json", "w") as f:
-            json.dump(result.model_dump(), f, indent=2)
+        # Save correlation matrix with error handling
+        try:
+            artifacts_dir = settings.artifacts_dir
+            artifacts_dir.mkdir(exist_ok=True)
+            with open(artifacts_dir / "correlation_matrix.json", "w") as f:
+                json.dump(result.model_dump(), f, indent=2)
+        except Exception:
+            # If saving fails, continue without saving (non-critical)
+            pass
         
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, f"Phase 9 failed: {str(e)}")
 
 
 @router.post("/phase9-5-business-validation", response_model=BusinessValidationResult)
