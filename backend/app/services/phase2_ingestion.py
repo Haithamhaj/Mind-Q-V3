@@ -91,7 +91,7 @@ class IngestionService:
                 # Try normal CSV parsing first
                 df = pd.read_csv(self.file_path, low_memory=False)
             except pd.errors.ParserError as e:
-                print(f"🔧 Phase 2 Ingestion: CSV parsing failed, applying Mind-Q recovery...")
+                print(f"Phase 2 Ingestion: CSV parsing failed, applying Mind-Q recovery...")
                 
                 # Mind-Q V3 CSV Recovery for Ingestion
                 recovery_attempts = [
@@ -105,8 +105,8 @@ class IngestionService:
                     try:
                         df = strategy()
                         if len(df) > 0:
-                            print(f"✅ Phase 2 CSV Recovery: Strategy {i+1} successful")
-                            print(f"📊 Recovered {len(df)} rows for ingestion")
+                            print(f"Phase 2 CSV Recovery: Strategy {i+1} successful")
+                            print(f"Recovered {len(df)} rows for ingestion")
                             break
                     except Exception:
                         continue

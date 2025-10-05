@@ -14,10 +14,10 @@ def copy_typed_to_imputed():
     
     if typed_path.exists():
         shutil.copy2(typed_path, imputed_path)
-        print(f"✅ Copied {typed_path} to {imputed_path}")
+        print(f" Copied {typed_path} to {imputed_path}")
         return True
     else:
-        print(f"❌ {typed_path} not found")
+        print(f" {typed_path} not found")
         return False
 
 if __name__ == "__main__":

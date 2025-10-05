@@ -23,7 +23,7 @@ def fix_phase4():
         if original_size > 50000:  # Sample if > 50K rows
             sample_size = 50000
             df_sample = self.df.sample(n=sample_size, random_state=42)
-            print(f"🔧 Phase 4: Sampling {sample_size} rows from {original_size} total")
+            print(f"Phase 4: Sampling {sample_size} rows from {original_size} total")
         else:
             df_sample = self.df
         
@@ -36,9 +36,9 @@ def fix_phase4():
         with open("app/services/phase4_profiling.py", "w") as f:
             f.write(content)
         
-        print("✅ Fixed Phase 4 timeout issue with sampling")
+        print(" Fixed Phase 4 timeout issue with sampling")
     else:
-        print("✅ Phase 4 already has sampling logic")
+        print(" Phase 4 already has sampling logic")
 
 if __name__ == "__main__":
     fix_phase4()

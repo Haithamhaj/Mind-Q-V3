@@ -14,17 +14,17 @@ def create_all_chain_files():
     # Check what we have
     print("📋 Current artifacts:")
     for file in artifacts_dir.glob("*.parquet"):
-        print(f"  ✅ {file.name}")
+        print(f"  {file.name}")
     for file in artifacts_dir.glob("*.json"):
-        print(f"  ✅ {file.name}")
+        print(f"  {file.name}")
     
-    print("\n🔧 Creating missing chain files...")
+    print("\nCreating missing chain files...")
     
     # Base files should exist
     typed_path = artifacts_dir / "typed_data.parquet"
     
     if not typed_path.exists():
-        print("❌ typed_data.parquet not found - cannot create chain")
+        print("typed_data.parquet not found - cannot create chain")
         return
     
     # Chain: typed_data → imputed_data → standardized_data → features_data → encoded_data
@@ -43,7 +43,7 @@ def create_all_chain_files():
         target_path = artifacts_dir / target_file
         if not target_path.exists():
             shutil.copy2(source_file, target_path)
-            print(f"✅ Created {target_file}")
+            print(f"Created {target_file}")
             source_file = target_path  # Use previous as source for next
     
     # Create required JSON files
@@ -78,9 +78,9 @@ def create_all_chain_files():
         if not file_path.exists():
             with open(file_path, 'w') as f:
                 json.dump(content, f, indent=2)
-            print(f"✅ Created {filename}")
+            print(f"Created {filename}")
     
-    print("🎉 Complete file chain created! All phases should work now.")
+    print("Complete file chain created! All phases should work now.")
 
 if __name__ == "__main__":
     create_all_chain_files()

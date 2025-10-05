@@ -89,12 +89,12 @@ def demo_quality_control():
         if result.errors:
             print(f"\nErrors ({len(result.errors)}):")
             for error in result.errors:
-                print(f"  ❌ {error}")
+                print(f"   {error}")
         
         if result.warnings:
             print(f"\nWarnings ({len(result.warnings)}):")
             for warning in result.warnings:
-                print(f"  ⚠️  {warning}")
+                print(f"    {warning}")
         
         # Show missing data report
         if result.missing_report:

@@ -59,11 +59,11 @@ class BIOrchestrator:
         parsed_query = self.parser.parse(user_question, self.llm_call)
         
         # Debug: Print parsed query details
-        print(f"🔍 Parsed Query: {parsed_query}")
-        print(f"🔍 Entities type: {type(parsed_query.entities)}")
-        print(f"🔍 Entities value: {parsed_query.entities}")
-        print(f"🔍 Filters type: {type(parsed_query.filters)}")
-        print(f"🔍 Filters value: {parsed_query.filters}")
+        print(f" Parsed Query: {parsed_query}")
+        print(f" Entities type: {type(parsed_query.entities)}")
+        print(f" Entities value: {parsed_query.entities}")
+        print(f" Filters type: {type(parsed_query.filters)}")
+        print(f" Filters value: {parsed_query.filters}")
         
         lang = parsed_query.language
         intent = parsed_query.intent

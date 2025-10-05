@@ -126,7 +126,7 @@ async def run_quality_control(
                 # Try normal parsing first
                 df = pd.read_csv(file.file)
             except pd.errors.ParserError as e:
-                print(f"🔧 CSV parsing failed, applying Mind-Q recovery...")
+                print(f"CSV parsing failed, applying Mind-Q recovery...")
                 file.file.seek(0)
                 
                 # Mind-Q V3 CSV Recovery Strategies (based on common issues)
@@ -160,8 +160,8 @@ async def run_quality_control(
                         detail=f"Mind-Q-V3 CSV auto-recovery failed. File severely malformed: {str(e)}"
                     )
                 
-                print(f"✅ Mind-Q CSV Recovery Success: {strategy_used}")
-                print(f"📊 Recovered {len(df)} rows from malformed CSV")
+                print(f"Mind-Q CSV Recovery Success: {strategy_used}")
+                print(f"Recovered {len(df)} rows from malformed CSV")
                 
         elif file.filename.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(file.file)
@@ -367,7 +367,8 @@ async def run_phase1(
         df_sample = pd.read_parquet(cleaned_data_path).head(10)
         columns = df_sample.columns.tolist()
         
-        data_sample = df_sample.to_string(max_rows=5, max_cols=10)
+        # Avoid to_string() to prevent Unicode encoding issues
+        data_sample = f"Shape: {df_sample.shape}, Columns: {list(df_sample.columns)}"
         
         service = GoalKPIsService(columns=columns, domain=domain, data_sample=data_sample)
         result = service.run()
@@ -752,13 +753,13 @@ async def run_phase8():
             duplicate_issues = [issue for issue in result.issues if issue.issue_type == "duplicates"]
             
             if duplicate_issues and len(duplicate_issues) > 0:
-                print("🔧 Mind-Q-V3 Auto-Fix: High duplicates detected, continuing with warning...")
+                print("Mind-Q-V3 Auto-Fix: High duplicates detected, continuing with warning...")
                 
                 # Convert STOP to WARN and continue pipeline
                 result.status = "WARN"
                 
-                print(f"✅ Phase 8: Converted STOP to WARN due to duplicates - pipeline continues")
-                print(f"📊 Will save data as-is for next phases")
+                print(f"Phase 8: Converted STOP to WARN due to duplicates - pipeline continues")
+                print(f"Will save data as-is for next phases")
             else:
                 raise HTTPException(400, f"Merging failed: {result.issues}")
         

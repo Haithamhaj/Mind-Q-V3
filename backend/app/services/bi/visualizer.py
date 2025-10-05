@@ -101,8 +101,8 @@ class Visualizer:
         metric = entities.get("metric", "Value")
         dimension = entities.get("dimension", "Category")
         
-        print(f"🔍 _grouped_bar_chart data: {data}")
-        print(f"🔍 _grouped_bar_chart data type: {type(data)}")
+        print(f" _grouped_bar_chart data: {data}")
+        print(f" _grouped_bar_chart data type: {type(data)}")
         
         categories = list(data.keys())
         means = []
@@ -110,11 +110,11 @@ class Visualizer:
         
         for k in categories:
             value = data[k]
-            print(f"🔍 Key: {k}, Value: {value}, Type: {type(value)}")
+            print(f" Key: {k}, Value: {value}, Type: {type(value)}")
             
             # Handle error cases
             if isinstance(value, str) and 'error' in value.lower():
-                print(f"❌ Error in data: {value}")
+                print(f" Error in data: {value}")
                 continue
             
             if isinstance(value, dict):
@@ -130,12 +130,12 @@ class Visualizer:
                     means.append(float(value) if value is not None else 0)
                     medians.append(float(value) if value is not None else 0)
                 except (ValueError, TypeError) as e:
-                    print(f"❌ Could not convert value {value} to float: {e}")
+                    print(f" Could not convert value {value} to float: {e}")
                     continue
         
         # Check if we have valid data
         if not means or not medians:
-            print("❌ No valid data for grouped bar chart")
+            print(" No valid data for grouped bar chart")
             return {
                 "type": "metric",
                 "value": "No data available",

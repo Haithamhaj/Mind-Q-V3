@@ -111,14 +111,14 @@ Return only the JSON array:"""
                     kpis_json = json_match.group(0)
                     kpis = json.loads(kpis_json)
                     if isinstance(kpis, list) and len(kpis) > 0:
-                        print(f"🤖 AI suggested KPIs: {kpis}")
+                        print(f"AI suggested KPIs: {kpis}")
                         return kpis
             
-            print("❌ AI KPI suggestion failed, using fallback")
+            print("AI KPI suggestion failed, using fallback")
             return []
             
         except Exception as e:
-            print(f"❌ AI KPI suggestion error: {e}")
+            print(f"AI KPI suggestion error: {e}")
             return []
     
     def _check_compatibility(self) -> DomainCompatibilityResult:

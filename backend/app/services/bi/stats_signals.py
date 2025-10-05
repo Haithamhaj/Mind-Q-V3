@@ -23,7 +23,15 @@ def _orphans_dup_metrics(df: pd.DataFrame, key_cols: Optional[list] = None) -> D
 def _skew_kurtosis(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
     """Calculate skewness and kurtosis for numeric columns"""
     out = {}
-    for c in df.select_dtypes(include=[np.number]).columns:
+    numeric_cols = []
+    for c in df.columns:
+        try:
+            if pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype not in ['bool', 'boolean']:
+                numeric_cols.append(c)
+        except:
+            continue
+    
+    for c in numeric_cols:
         s = df[c].dropna()
         if len(s) >= 10:
             out[c] = {
@@ -36,7 +44,15 @@ def _skew_kurtosis(df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
 def _outlier_pct_iqr(df: pd.DataFrame) -> Dict[str, float]:
     """Calculate outlier percentage using IQR method"""
     out = {}
-    for c in df.select_dtypes(include=[np.number]).columns:
+    numeric_cols = []
+    for c in df.columns:
+        try:
+            if pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype not in ['bool', 'boolean']:
+                numeric_cols.append(c)
+        except:
+            continue
+    
+    for c in numeric_cols:
         s = df[c].dropna()
         if len(s) < 10:
             continue
@@ -50,7 +66,15 @@ def _outlier_pct_iqr(df: pd.DataFrame) -> Dict[str, float]:
 def _quantiles(df: pd.DataFrame, qs=(0.9, 0.95)) -> Dict[str, Dict[str, float]]:
     """Calculate quantiles for numeric columns"""
     out = {}
-    for c in df.select_dtypes(include=[np.number]).columns:
+    numeric_cols = []
+    for c in df.columns:
+        try:
+            if pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype not in ['bool', 'boolean']:
+                numeric_cols.append(c)
+        except:
+            continue
+    
+    for c in numeric_cols:
         s = df[c].dropna()
         if len(s) >= 10:
             out[c] = {f"p{int(q*100)}": float(np.quantile(s, q)) for q in qs}
@@ -59,7 +83,14 @@ def _quantiles(df: pd.DataFrame, qs=(0.9, 0.95)) -> Dict[str, Dict[str, float]]:
 
 def _date_col(df: pd.DataFrame) -> Optional[str]:
     """Find first datetime column"""
-    dt_cols = [c for c in df.columns if np.issubdtype(df[c].dtype, np.datetime64)]
+    dt_cols = []
+    for c in df.columns:
+        try:
+            if np.issubdtype(df[c].dtype, np.datetime64):
+                dt_cols.append(c)
+        except TypeError:
+            # Handle problematic dtypes like 'string[python]'
+            continue
     return dt_cols[0] if dt_cols else None
 
 

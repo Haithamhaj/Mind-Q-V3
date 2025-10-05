@@ -36,7 +36,7 @@ class QueryParser:
         try:
             llm_response = llm_call(prompt)
         except Exception as e:
-            print(f"❌ LLM Call Error: {e}")
+            print(f" LLM Call Error: {e}")
             return ParsedQuery(
                 intent="unknown",
                 entities={},
@@ -47,15 +47,15 @@ class QueryParser:
             )
         
         # Debug: Print LLM response
-        print(f"🔍 LLM Response for '{user_question}': {llm_response}")
-        print(f"🔍 Response type: {type(llm_response)}")
+        print(f" LLM Response for '{user_question}': {llm_response}")
+        print(f" Response type: {type(llm_response)}")
         
         # Handle None or empty responses
         if llm_response is None:
-            print("❌ LLM returned None")
+            print(" LLM returned None")
             llm_response = ""
         elif not isinstance(llm_response, str):
-            print(f"❌ LLM returned non-string: {type(llm_response)}")
+            print(f" LLM returned non-string: {type(llm_response)}")
             llm_response = str(llm_response)
         
         # Parse response
@@ -334,7 +334,7 @@ Question: "What are the data talking about?"
     def _parse_llm_response(self, llm_response: str, original: str) -> ParsedQuery:
         """Parse LLM JSON response"""
         
-        print(f"🔍 Raw LLM Response: {repr(llm_response)}")
+        print(f" Raw LLM Response: {repr(llm_response)}")
         
         cleaned = llm_response.strip()
         
@@ -352,11 +352,11 @@ Question: "What are the data talking about?"
         if json_match:
             cleaned = json_match.group(0)
         
-        print(f"🔍 Extracted JSON: {repr(cleaned)}")
+        print(f" Extracted JSON: {repr(cleaned)}")
         
         try:
             parsed_json = json.loads(cleaned)
-            print(f"🔍 Parsed JSON: {parsed_json}")
+            print(f" Parsed JSON: {parsed_json}")
             
             # Ensure required fields exist with defaults
             parsed_json["original"] = original
@@ -381,21 +381,21 @@ Question: "What are the data talking about?"
             if "aggregation" not in parsed_json:
                 parsed_json["aggregation"] = "mean"
             
-            print(f"🔍 Final parsed data: {parsed_json}")
+            print(f" Final parsed data: {parsed_json}")
             
             return ParsedQuery(**parsed_json)
             
         except json.JSONDecodeError as e:
-            print(f"❌ JSON Decode Error: {e}")
-            print(f"❌ LLM Response: {llm_response}")
-            print(f"❌ Cleaned: {cleaned}")
+            print(f" JSON Decode Error: {e}")
+            print(f" LLM Response: {llm_response}")
+            print(f" Cleaned: {cleaned}")
         except Exception as e:
-            print(f"❌ General Error: {e}")
-            print(f"❌ LLM Response: {llm_response}")
-            print(f"❌ Cleaned: {cleaned}")
+            print(f" General Error: {e}")
+            print(f" LLM Response: {llm_response}")
+            print(f" Cleaned: {cleaned}")
         
         # Fallback - create a safe default response
-        print("🔄 Using fallback response")
+        print(" Using fallback response")
         return ParsedQuery(
             intent="unknown",
             entities={},

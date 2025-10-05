@@ -17,14 +17,14 @@ def create_missing_files():
     
     if typed_path.exists() and not imputed_path.exists():
         shutil.copy2(typed_path, imputed_path)
-        print(f"✅ Created {imputed_path}")
+        print(f" Created {imputed_path}")
     
     # 2. Create standardized_data.parquet (for Phase 7)  
     if imputed_path.exists():
         standardized_path = artifacts_dir / "standardized_data.parquet"
         if not standardized_path.exists():
             shutil.copy2(imputed_path, standardized_path)
-            print(f"✅ Created {standardized_path}")
+            print(f" Created {standardized_path}")
     
     # 3. Create features_data.parquet (for Phase 7.5)
     standardized_path = artifacts_dir / "standardized_data.parquet"
@@ -32,7 +32,7 @@ def create_missing_files():
         features_path = artifacts_dir / "features_data.parquet"
         if not features_path.exists():
             shutil.copy2(standardized_path, features_path)
-            print(f"✅ Created {features_path}")
+            print(f" Created {features_path}")
     
     # 4. Create feature_spec.json (for Phase 7.5)
     feature_spec = {
@@ -48,7 +48,7 @@ def create_missing_files():
     if not feature_spec_path.exists():
         with open(feature_spec_path, 'w') as f:
             json.dump(feature_spec, f, indent=2)
-        print(f"✅ Created {feature_spec_path}")
+        print(f" Created {feature_spec_path}")
     
     print("🎯 All prerequisite files created!")
 

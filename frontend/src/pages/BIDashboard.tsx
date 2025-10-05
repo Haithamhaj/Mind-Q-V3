@@ -14,11 +14,22 @@ interface KPI {
   format: string
 }
 
-interface Recommendation {
-  title: string
-  description: string
-  severity: string
-}
+    interface Recommendation {
+      title: string
+      description: string
+      type: string
+      category: string
+      severity: string
+      priority: number
+      actionable: boolean
+      estimated_impact: string
+      implementation_effort: string
+      confidence: number
+      related_phases: string[]
+      business_value: string
+      evidence: string
+      verification_needed: boolean
+    }
 
 interface Signals {
   meta: {
@@ -39,15 +50,18 @@ export default function BIDashboard() {
   const [kpis, setKpis] = useState<KPI[]>([])
   const [accumulatedKpis, setAccumulatedKpis] = useState<KPI[]>([]) 
   const [recommendations, setRecommendations] = useState<Recommendation[]>([])
+  const [aiRecommendations, setAiRecommendations] = useState<any>(null)
+  const [selectedRecommendationType, setSelectedRecommendationType] = useState<string>('all')
   const [signals, setSignals] = useState<Signals | null>(null)
   const [domain, setDomain] = useState('logistics')
   const [pipelineData, setPipelineData] = useState<any>(null)
 
+  // Load pipeline data on mount
   useEffect(() => {
     const savedData = getPipelineData()
     if (savedData) {
       setPipelineData(savedData)
-      setDomain(savedData.domain || 'logistics')
+      setDomain(savedData.domain || 'logistics')  // Default to logistics to match the data
       console.log('📊 BI Dashboard: Loaded pipeline data from localStorage')
     }
     
@@ -60,8 +74,13 @@ export default function BIDashboard() {
         console.error('Failed to load accumulated KPIs:', e)
       }
     }
-    
-    loadDashboardData()
+  }, [])
+
+  // Load dashboard data when domain changes
+  useEffect(() => {
+    if (domain) {
+      loadDashboardData()
+    }
   }, [domain])
 
   // Save accumulated KPIs to localStorage whenever they change
@@ -78,6 +97,34 @@ export default function BIDashboard() {
       phaseResults: pipelineData?.phaseResults || {},
       progress: pipelineData?.progress || 0
     })
+  }
+
+  const getRecommendationTypeInfo = (type: string) => {
+    const types = {
+      data_insight: { label: 'Data Insights', icon: '📊', color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700' },
+      best_practice: { label: 'Best Practices', icon: '🏆', color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700' },
+      hidden_pattern: { label: 'Hidden Patterns', icon: '🔍', color: 'purple', bgColor: 'bg-purple-100', textColor: 'text-purple-700' },
+      user_check: { label: 'User Checks', icon: '✅', color: 'yellow', bgColor: 'bg-yellow-100', textColor: 'text-yellow-700' },
+      future_action: { label: 'Future Actions', icon: '🚀', color: 'indigo', bgColor: 'bg-indigo-100', textColor: 'text-indigo-700' },
+      warning: { label: 'Warnings', icon: '⚠️', color: 'red', bgColor: 'bg-red-100', textColor: 'text-red-700' }
+    }
+    return types[type as keyof typeof types] || { label: type, icon: '📋', color: 'gray', bgColor: 'bg-gray-100', textColor: 'text-gray-700' }
+  }
+
+  const getFilteredRecommendations = () => {
+    if (!aiRecommendations?.recommendations) return []
+    if (selectedRecommendationType === 'all') return aiRecommendations.recommendations
+    return aiRecommendations.recommendations.filter((rec: Recommendation) => rec.type === selectedRecommendationType)
+  }
+
+  const getRecommendationsByType = () => {
+    if (!aiRecommendations?.recommendations) return {}
+    const grouped = aiRecommendations.recommendations.reduce((acc: any, rec: Recommendation) => {
+      if (!acc[rec.type]) acc[rec.type] = []
+      acc[rec.type].push(rec)
+      return acc
+    }, {})
+    return grouped
   }
 
   // Extract KPIs from user query responses
@@ -185,8 +232,11 @@ export default function BIDashboard() {
   }
 
   const loadDashboardData = async () => {
+    console.log('🔄 Loading dashboard data for domain:', domain)
+    
+    // Load KPIs
     try {
-      const kpiRes = await fetch(`http://localhost:8000/api/v1/bi/kpis?domain=${domain}`)
+      const kpiRes = await fetch(`http://localhost:8001/api/v1/bi/kpis?domain=${domain}`)
       if (kpiRes.ok) {
         const kpiData = await kpiRes.json()
         setKpis(formatKPIs(kpiData, domain))
@@ -194,8 +244,14 @@ export default function BIDashboard() {
         console.error('Failed to load KPIs:', kpiRes.status)
         setKpis([])
       }
+    } catch (error) {
+      console.error('Failed to load KPIs:', error)
+      setKpis([])
+    }
 
-      const recRes = await fetch(`http://localhost:8000/api/v1/bi/recommendations?domain=${domain}`)
+    // Load recommendations
+    try {
+      const recRes = await fetch(`http://localhost:8001/api/v1/bi/recommendations?domain=${domain}`)
       if (recRes.ok) {
         const recData = await recRes.json()
         setRecommendations(Array.isArray(recData) ? recData : [])
@@ -203,9 +259,14 @@ export default function BIDashboard() {
         console.error('Failed to load recommendations:', recRes.status)
         setRecommendations([])
       }
+    } catch (error) {
+      console.error('Failed to load recommendations:', error)
+      setRecommendations([])
+    }
 
-      // Load signals
-      const sigRes = await fetch(`http://localhost:8000/api/v1/bi/signals?domain=${domain}`)
+    // Load signals (optional - don't let this fail the whole dashboard)
+    try {
+      const sigRes = await fetch(`http://localhost:8001/api/v1/bi/signals?domain=${domain}`)
       if (sigRes.ok) {
         const sigData = await sigRes.json()
         setSignals(sigData)
@@ -214,11 +275,25 @@ export default function BIDashboard() {
         setSignals(null)
       }
     } catch (error) {
-      console.error('Failed to load dashboard data:', error)
-      // Set default values on error
-      setKpis([])
-      setRecommendations([])
+      console.error('Failed to load signals (optional):', error)
       setSignals(null)
+    }
+
+    // Load AI recommendations
+    try {
+      console.log('🔍 Loading AI recommendations for domain:', domain)
+      const aiRecRes = await fetch(`http://localhost:8001/api/v1/bi/ai-recommendations?domain=${domain}`)
+      if (aiRecRes.ok) {
+        const aiRecData = await aiRecRes.json()
+        console.log('✅ AI recommendations loaded:', aiRecData)
+        setAiRecommendations(aiRecData)
+      } else {
+        console.error('❌ Failed to load AI recommendations:', aiRecRes.status)
+        setAiRecommendations(null)
+      }
+    } catch (error) {
+      console.error('Failed to load AI recommendations:', error)
+      setAiRecommendations(null)
     }
   }
 
@@ -273,7 +348,7 @@ export default function BIDashboard() {
       formData.append('domain', domain)
       formData.append('time_window', signals?.meta.time_window || '2024-01-01..2024-12-31')
 
-      const res = await fetch('http://localhost:8000/api/v1/bi/ask', {
+      const res = await fetch('http://localhost:8001/api/v1/bi/ask', {
         method: 'POST',
         body: formData
       })
@@ -885,6 +960,251 @@ export default function BIDashboard() {
 
           {/* Right Column */}
           <div className="space-y-6">
+            {/* AI-Powered Recommendations */}
+            
+            {/* Debug: Show current state */}
+            <div className="text-xs text-gray-500 bg-gray-100 p-2 rounded">
+              Debug: Domain={domain}, AI Recommendations={aiRecommendations ? 'Loaded' : 'Not loaded'}, 
+              Count={aiRecommendations?.recommendations?.length || 0}
+              <br />
+              Full aiRecommendations: {JSON.stringify(aiRecommendations, null, 2).substring(0, 200)}...
+            </div>
+            
+            {/* Always show the card, but with different content based on loading state */}
+            <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-blue-50">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-purple-800">🤖 AI-Powered Recommendations</CardTitle>
+                    <div className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                      AI-Generated
+                    </div>
+                  </div>
+                  {aiRecommendations && aiRecommendations.summary && (
+                    <p className="text-sm text-gray-600 mt-2">{aiRecommendations.summary}</p>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Health Scores */}
+                  {aiRecommendations && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-white p-3 rounded-lg border">
+                        <div className="text-sm text-gray-600">Data Quality Score</div>
+                        <div className="text-2xl font-bold text-blue-600">
+                          {aiRecommendations.data_quality_score?.toFixed(1) || 'N/A'}%
+                        </div>
+                      </div>
+                      <div className="bg-white p-3 rounded-lg border">
+                        <div className="text-sm text-gray-600">Overall Health</div>
+                        <div className="text-2xl font-bold text-green-600">
+                          {aiRecommendations.overall_health_score?.toFixed(1) || 'N/A'}%
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recommendation Type Filter */}
+                  {aiRecommendations && aiRecommendations.recommendations && aiRecommendations.recommendations.length > 0 ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-gray-700">
+                          Intelligent Recommendations ({aiRecommendations.recommendations.length})
+                        </div>
+                        <select
+                          value={selectedRecommendationType}
+                          onChange={(e) => setSelectedRecommendationType(e.target.value)}
+                          className="text-xs border border-gray-300 rounded px-2 py-1"
+                        >
+                          <option value="all">All Types</option>
+                          <option value="data_insight">📊 Data Insights</option>
+                          <option value="best_practice">🏆 Best Practices</option>
+                          <option value="hidden_pattern">🔍 Hidden Patterns</option>
+                          <option value="user_check">✅ User Checks</option>
+                          <option value="future_action">🚀 Future Actions</option>
+                          <option value="warning">⚠️ Warnings</option>
+                        </select>
+                      </div>
+
+                      {/* Grouped Recommendations */}
+                      {selectedRecommendationType === 'all' ? (
+                        // Show grouped by type
+                        Object.entries(getRecommendationsByType()).map(([type, recs]: [string, any]) => {
+                          const typeInfo = getRecommendationTypeInfo(type)
+                          return (
+                            <div key={type} className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <div className={`text-xs px-2 py-1 rounded-full ${typeInfo.bgColor} ${typeInfo.textColor}`}>
+                                  {typeInfo.icon} {typeInfo.label} ({recs.length})
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                {recs.slice(0, 2).map((rec: any, idx: number) => (
+                                  <div key={idx} className="bg-white border border-purple-200 rounded-lg p-3">
+                                    <div className="flex items-start justify-between mb-2">
+                                      <div className="font-semibold text-gray-800 text-sm">{rec.title}</div>
+                                      <div className="flex gap-1">
+                                        <div className={`text-xs px-2 py-1 rounded ${
+                                          rec.severity === 'high' ? 'bg-red-100 text-red-700' :
+                                          rec.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                          'bg-blue-100 text-blue-700'
+                                        }`}>
+                                          {rec.severity}
+                                        </div>
+                                        <div className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
+                                          P{rec.priority}
+                                        </div>
+                                        {rec.verification_needed && (
+                                          <div className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-700">
+                                            Verify
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-xs text-gray-600 mb-2">{rec.description}</div>
+                                    {rec.evidence && (
+                                      <div className="text-xs text-blue-600 mb-2 bg-blue-50 p-2 rounded">
+                                        📊 Evidence: {rec.evidence}
+                                      </div>
+                                    )}
+                                    <div className="flex items-center justify-between text-xs">
+                                      <div className="flex gap-3">
+                                        <span className="text-gray-500">
+                                          Impact: <span className="font-medium text-green-600">{rec.estimated_impact}</span>
+                                        </span>
+                                        <span className="text-gray-500">
+                                          Effort: <span className="font-medium text-blue-600">{rec.implementation_effort}</span>
+                                        </span>
+                                        <span className="text-gray-500">
+                                          Confidence: <span className="font-medium text-purple-600">{(rec.confidence * 100).toFixed(0)}%</span>
+                                        </span>
+                                      </div>
+                                      {rec.actionable && (
+                                        <div className="text-green-600 font-medium">✓ Actionable</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        // Show filtered recommendations
+                        <div className="space-y-2">
+                          {getFilteredRecommendations().map((rec: any, idx: number) => {
+                            const typeInfo = getRecommendationTypeInfo(rec.type)
+                            return (
+                              <div key={idx} className="bg-white border border-purple-200 rounded-lg p-3">
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="font-semibold text-gray-800 text-sm">{rec.title}</div>
+                                    <div className={`text-xs px-2 py-1 rounded-full ${typeInfo.bgColor} ${typeInfo.textColor}`}>
+                                      {typeInfo.icon}
+                                    </div>
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <div className={`text-xs px-2 py-1 rounded ${
+                                      rec.severity === 'high' ? 'bg-red-100 text-red-700' :
+                                      rec.severity === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                      'bg-blue-100 text-blue-700'
+                                    }`}>
+                                      {rec.severity}
+                                    </div>
+                                    <div className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
+                                      P{rec.priority}
+                                    </div>
+                                    {rec.verification_needed && (
+                                      <div className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-700">
+                                        Verify
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-xs text-gray-600 mb-2">{rec.description}</div>
+                                {rec.evidence && (
+                                  <div className="text-xs text-blue-600 mb-2 bg-blue-50 p-2 rounded">
+                                    📊 Evidence: {rec.evidence}
+                                  </div>
+                                )}
+                                <div className="flex items-center justify-between text-xs">
+                                  <div className="flex gap-3">
+                                    <span className="text-gray-500">
+                                      Impact: <span className="font-medium text-green-600">{rec.estimated_impact}</span>
+                                    </span>
+                                    <span className="text-gray-500">
+                                      Effort: <span className="font-medium text-blue-600">{rec.implementation_effort}</span>
+                                    </span>
+                                    <span className="text-gray-500">
+                                      Confidence: <span className="font-medium text-purple-600">{(rec.confidence * 100).toFixed(0)}%</span>
+                                    </span>
+                                  </div>
+                                  {rec.actionable && (
+                                    <div className="text-green-600 font-medium">✓ Actionable</div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="text-center py-8 text-gray-500">
+                        <div className="text-sm font-semibold text-gray-700 mb-2">No AI Recommendations Available</div>
+                        <div className="text-xs">
+                          {aiRecommendations ? 'Recommendations data is empty' : 'AI recommendations not loaded yet'}
+                        </div>
+                        <div className="text-xs mt-2">
+                          Domain: {domain} | 
+                          Status: {aiRecommendations ? 'Data loaded but no recommendations' : 'Still loading...'}
+                        </div>
+                        <div className="mt-4 text-xs text-blue-600">
+                          Debug: aiRecommendations type = {typeof aiRecommendations}, 
+                          aiRecommendations = {aiRecommendations ? 'exists' : 'null'}, 
+                          recommendations = {aiRecommendations?.recommendations ? 'exists' : 'missing'}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Next Steps */}
+                  {aiRecommendations && aiRecommendations.next_steps && aiRecommendations.next_steps.length > 0 && (
+                    <div>
+                      <div className="text-sm font-semibold text-gray-700 mb-2">Next Steps</div>
+                      <div className="space-y-1">
+                        {aiRecommendations.next_steps.map((step: string, idx: number) => (
+                          <div key={idx} className="text-xs text-gray-600 bg-white p-2 rounded border">
+                            {step}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border-gray-200 bg-gray-50">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-gray-600">🤖 AI-Powered Recommendations</CardTitle>
+                    <div className="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded-full">
+                      Loading...
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center py-8 text-gray-500">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                    <div>Loading AI recommendations...</div>
+                    <div className="text-xs mt-2">
+                      Domain: {domain} | 
+                      {aiRecommendations === null ? ' Fetching...' : ' Processing...'}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+            {/* Original Automated Recommendations */}
             <Card>
               <CardHeader>
                 <CardTitle>Automated Recommendations</CardTitle>

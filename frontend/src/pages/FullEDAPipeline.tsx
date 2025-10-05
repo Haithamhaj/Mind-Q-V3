@@ -166,7 +166,7 @@ export default function FullEDAPipeline() {
         } else if (phase.id === 'phase1') {
           // Phase 1: Goal & KPIs - works on cleaned data from Phase 0
           // No need to send file again, Phase 0 already processed it
-          response = await apiClient.post('/phases/phase1-goal-kpis', {
+          response = await apiClient.post('/phases/phase1-goal-kpis-clean', {
             domain: domain
           })
           
@@ -181,7 +181,7 @@ export default function FullEDAPipeline() {
           
         } else if (phase.id === 'phase4') {
           // Phase 4: Profiling - works on typed data
-          response = await apiClient.post('/phases/phase4-profiling')
+          response = await apiClient.post('/phases/phase4-profiling-clean')
           
         } else if (phase.id === 'phase5') {
           // Phase 5: Missing Data - works on typed data
