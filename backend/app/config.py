@@ -12,14 +12,18 @@ class Settings(BaseSettings):
     artifacts_dir: Path = base_dir / "artifacts"
     spec_path: Path = base_dir / "spec" / "master_eda_spec_v1.2.2.json"
     
-    # CORS
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175"]
     
-    # Limits
     max_file_size_mb: int = 500
+    
+    llm_provider: str = "gemini"
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
     
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Allow extra environment variables
 
 settings = Settings()
 

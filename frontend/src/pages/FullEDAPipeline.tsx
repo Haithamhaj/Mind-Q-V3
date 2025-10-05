@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import FileUpload from '@/components/FileUpload'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Loader2, Play, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Loader2, Play, CheckCircle, XCircle, Clock, Download } from 'lucide-react'
 import { apiClient } from '@/api/client'
+import { savePipelineData, getPipelineData, clearPipelineData, hasValidPipelineData, getStoredFileInfo } from '@/lib/localStorage'
 
 interface PhaseResult {
   status: string
@@ -23,10 +24,9 @@ interface PhaseInfo {
   requiresTarget?: boolean
 }
 
-// ALL phases that are built and ready in Mind-Q-V3 Backend
 const MIND_Q_V3_PHASES: PhaseInfo[] = [
   { id: 'phase0', name: 'Phase 0: Quality Control', endpoint: '/phases/quality-control', description: 'Upload and validate data quality', requiresFile: true },
-  { id: 'phase1', name: 'Phase 1: Goal & KPIs', endpoint: '/phases/phase1-goal-kpis', description: 'Define business objectives from your data', requiresFile: true },
+  { id: 'phase1', name: 'Phase 1: Goal & KPIs', endpoint: '/phases/phase1-goal-kpis', description: '🤖 AI-powered business objectives and KPI selection', requiresFile: true },
   { id: 'phase2', name: 'Phase 2: Data Ingestion', endpoint: '/phases/phase2-ingestion', description: 'Process and store data as Parquet', requiresFile: true },
   { id: 'phase3', name: 'Phase 3: Schema Discovery', endpoint: '/phases/phase3-schema', description: 'Analyze data structure and types', requiresFile: false },
   { id: 'phase4', name: 'Phase 4: Data Profiling', endpoint: '/phases/phase4-profiling', description: 'Generate comprehensive statistics', requiresFile: false },
@@ -50,16 +50,85 @@ export default function FullEDAPipeline() {
   const [targetColumn, setTargetColumn] = useState('')
   const [domain, setDomain] = useState('healthcare')
 
+  // Load saved data on component mount
+  useEffect(() => {
+    const savedData = getPipelineData()
+    if (savedData) {
+      console.log('📁 Loading saved pipeline data from localStorage...')
+      setDomain(savedData.domain || 'healthcare')
+      setTargetColumn(savedData.targetColumn || '')
+      setPhaseResults(savedData.phaseResults || {})
+      setProgress(savedData.progress || 0)
+      
+      // Check if we have a stored file info
+      const fileInfo = getStoredFileInfo()
+      if (fileInfo) {
+        console.log('📄 Found stored file info:', fileInfo.name)
+      }
+    }
+  }, [])
+
   const handleFileSelect = (file: File) => {
     setSelectedFile(file)
     setPhaseResults({})
     setProgress(0)
+    
+    // Save file info to localStorage
+    savePipelineData({
+      selectedFile: {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified
+      },
+      domain,
+      targetColumn,
+      phaseResults: {},
+      progress: 0
+    })
   }
 
   const handleFileRemove = () => {
     setSelectedFile(null)
     setPhaseResults({})
     setProgress(0)
+    
+    // Clear localStorage when file is removed
+    clearPipelineData()
+  }
+
+  const saveProgress = (newResults: Record<string, PhaseResult>, newProgress: number) => {
+    setPhaseResults(newResults)
+    setProgress(newProgress)
+    
+    savePipelineData({
+      domain,
+      targetColumn,
+      phaseResults: newResults,
+      progress: newProgress
+    })
+  }
+
+  // Handle domain change
+  const handleDomainChange = (newDomain: string) => {
+    setDomain(newDomain)
+    savePipelineData({
+      domain: newDomain,
+      targetColumn,
+      phaseResults,
+      progress
+    })
+  }
+
+  // Handle target column change
+  const handleTargetColumnChange = (newTargetColumn: string) => {
+    setTargetColumn(newTargetColumn)
+    savePipelineData({
+      domain,
+      targetColumn: newTargetColumn,
+      phaseResults,
+      progress
+    })
   }
 
   const runFullPipeline = async () => {
@@ -71,15 +140,15 @@ export default function FullEDAPipeline() {
     console.log('🚀 Starting REAL Mind-Q-V3 analysis with proper phase sequence...')
     console.log('File:', selectedFile.name, 'Domain:', domain)
     setIsRunning(true)
-    setPhaseResults({})
-    setProgress(0)
     
     const results: Record<string, PhaseResult> = {}
+    saveProgress({}, 0)
 
     for (let i = 0; i < PHASES.length; i++) {
       const phase = PHASES[i]
       setCurrentPhase(phase.id)
-      setProgress((i / PHASES.length) * 100)
+      const currentProgress = (i / PHASES.length) * 100
+      setProgress(currentProgress)
 
       try {
         let response
@@ -271,7 +340,8 @@ export default function FullEDAPipeline() {
       }
 
       // Update results after each phase (whether success, error, or fallback)
-      setPhaseResults(prev => ({...prev, [phase.id]: results[phase.id]}))
+      const updatedResults = {...results}
+      saveProgress(updatedResults, currentProgress)
       
       // Small delay for better UX  
       await new Promise(resolve => setTimeout(resolve, 300))
@@ -331,7 +401,7 @@ export default function FullEDAPipeline() {
                 <label className="block text-sm font-medium mb-2">Domain (Built in Mind-Q-V3)</label>
                 <select 
                   value={domain} 
-                  onChange={(e) => setDomain(e.target.value)}
+                  onChange={(e) => handleDomainChange(e.target.value)}
                   className="w-full p-2 border rounded-md"
                 >
                   <option value="healthcare">Healthcare - Hospital Operations</option>
@@ -350,7 +420,7 @@ export default function FullEDAPipeline() {
                 <input
                   type="text"
                   value={targetColumn}
-                  onChange={(e) => setTargetColumn(e.target.value)}
+                  onChange={(e) => handleTargetColumnChange(e.target.value)}
                   placeholder="Healthcare: Showed_up | Logistics: delivery_status | Finance: default_flag"
                   className="w-full p-2 border rounded-md"
                 />
@@ -360,24 +430,46 @@ export default function FullEDAPipeline() {
               </div>
             </div>
 
-            <Button
-              onClick={runFullPipeline}
-              disabled={!selectedFile || isRunning}
-              className="w-full"
-              size="lg"
-            >
-              {isRunning ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Running Full Pipeline...
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4 mr-2" />
-                  Run Mind-Q-V3 Analysis (Real Backend Processing)
-                </>
+            <div className="space-y-3">
+              {/* localStorage Status */}
+              {hasValidPipelineData() && (
+                <Alert>
+                  <Download className="h-4 w-4" />
+                  <AlertDescription>
+                    <div className="flex items-center justify-between">
+                      <span>Pipeline data saved locally. Data will persist across sessions.</span>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={clearPipelineData}
+                        className="ml-2"
+                      >
+                        Clear Data
+                      </Button>
+                    </div>
+                  </AlertDescription>
+                </Alert>
               )}
-            </Button>
+              
+              <Button 
+                onClick={runFullPipeline}
+                disabled={!selectedFile || isRunning}
+                className="w-full"
+                size="lg"
+              >
+                {isRunning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Running Full Pipeline...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Run Mind-Q-V3 Analysis (Real Backend Processing)
+                  </>
+                )}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -597,13 +689,24 @@ export default function FullEDAPipeline() {
                                     
                                     {result.data.kpis && result.data.kpis.length > 0 && (
                                       <div>
-                                        <div className="font-semibold text-blue-600 mb-1">Defined KPIs ({result.data.kpis.length}):</div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <div className="font-semibold text-blue-600">🤖 AI-Generated KPIs ({result.data.kpis.length}):</div>
+                                          <div className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">
+                                            AI-Powered
+                                          </div>
+                                        </div>
                                         <div className="grid grid-cols-1 gap-1">
                                           {result.data.kpis.map((kpi: string, idx: number) => (
-                                            <div key={idx} className="bg-blue-100 p-1 rounded text-xs">
-                                              📊 {kpi}
+                                            <div key={idx} className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 p-2 rounded text-xs">
+                                              <div className="flex items-center gap-2">
+                                                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                                <span className="font-medium text-gray-800">{kpi}</span>
+                                              </div>
                                             </div>
                                           ))}
+                                        </div>
+                                        <div className="mt-2 text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                                          💡 These KPIs were intelligently selected by AI based on your data structure and domain characteristics
                                         </div>
                                       </div>
                                     )}
@@ -863,7 +966,7 @@ export default function FullEDAPipeline() {
                                         <div className="space-y-1">
                                           {Object.entries(result.data.correlation_preview).slice(0, 3).map(([pair, corr]: [string, any]) => (
                                             <div key={pair} className="bg-blue-100 p-1 rounded text-xs">
-                                              <strong>{pair}:</strong> {typeof corr === 'number' ? corr.toFixed(3) : corr}
+                                              <strong>{pair}:</strong> {typeof corr === 'number' ? corr.toFixed(3) : JSON.stringify(corr)}
                                             </div>
                                           ))}
                                         </div>
@@ -1100,7 +1203,9 @@ export default function FullEDAPipeline() {
                                             <div key={idx} className="bg-green-100 p-1 rounded text-xs">
                                               <strong>{corr.feature1} &harr; {corr.feature2}:</strong>
                                               <div className="ml-2 text-xs">
-                                                {corr.method}: {corr.correlation.toFixed(3)} | p-value: {corr.p_value.toFixed(3)} | n: {corr.n}
+                                                {corr.method}: {typeof corr.correlation === 'number' ? corr.correlation.toFixed(3) : JSON.stringify(corr.correlation)} | 
+                                                p-value: {typeof corr.p_value === 'number' ? corr.p_value.toFixed(3) : JSON.stringify(corr.p_value)} | 
+                                                n: {corr.n}
                                               </div>
                                             </div>
                                           ))}
@@ -1116,7 +1221,9 @@ export default function FullEDAPipeline() {
                                             <div key={idx} className="bg-blue-100 p-1 rounded text-xs">
                                               <strong>{assoc.feature1} &harr; {assoc.feature2}:</strong>
                                               <div className="ml-2 text-xs">
-                                                {assoc.method}: {assoc.correlation.toFixed(3)} | p-value: {assoc.p_value.toFixed(3)} | n: {assoc.n}
+                                                {assoc.method}: {typeof assoc.correlation === 'number' ? assoc.correlation.toFixed(3) : JSON.stringify(assoc.correlation)} | 
+                                                p-value: {typeof assoc.p_value === 'number' ? assoc.p_value.toFixed(3) : JSON.stringify(assoc.p_value)} | 
+                                                n: {assoc.n}
                                               </div>
                                             </div>
                                           ))}
@@ -1130,7 +1237,7 @@ export default function FullEDAPipeline() {
                                         <div className="space-y-1">
                                           {result.data.strong_correlations.slice(0, 3).map((corr: any, idx: number) => (
                                             <div key={idx} className="bg-red-100 p-1 rounded text-xs">
-                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong> {corr.correlation.toFixed(3)}
+                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong> {typeof corr.correlation === 'number' ? corr.correlation.toFixed(3) : JSON.stringify(corr.correlation)}
                                             </div>
                                           ))}
                                         </div>
@@ -1143,7 +1250,7 @@ export default function FullEDAPipeline() {
                                         <div className="space-y-1">
                                           {result.data.moderate_correlations.slice(0, 3).map((corr: any, idx: number) => (
                                             <div key={idx} className="bg-yellow-100 p-1 rounded text-xs">
-                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong> {corr.correlation.toFixed(3)}
+                                              <strong>{corr.feature1} &harr; {corr.feature2}:</strong> {typeof corr.correlation === 'number' ? corr.correlation.toFixed(3) : JSON.stringify(corr.correlation)}
                                             </div>
                                           ))}
                                         </div>

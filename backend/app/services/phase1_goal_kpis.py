@@ -16,6 +16,7 @@ from ..models.schemas import (
 )
 from .domain_packs import DOMAIN_PACKS, get_domain_pack, suggest_domain
 from ..config import settings
+from .bi.llm_client import llm_client
 
 
 class DomainCompatibilityResult(BaseModel):
@@ -35,9 +36,10 @@ class GoalKPIsResult(BaseModel):
 
 
 class GoalKPIsService:
-    def __init__(self, columns: List[str], domain: Optional[str] = None):
+    def __init__(self, columns: List[str], domain: Optional[str] = None, data_sample: Optional[str] = None):
         self.columns = columns
         self.requested_domain = domain
+        self.data_sample = data_sample
     
     def run(self) -> GoalKPIsResult:
         """Execute Phase 1: Goal & KPIs"""
@@ -47,17 +49,77 @@ class GoalKPIsService:
             best_match = max(suggestions.items(), key=lambda x: x[1])
             self.requested_domain = best_match[0]
         
-        # Validate domain compatibility
         compatibility = self._check_compatibility()
+        ai_kpis = self._get_ai_powered_kpis()
         
-        # Load KPIs
-        domain_pack = get_domain_pack(self.requested_domain)
+        if not ai_kpis:
+            domain_pack = get_domain_pack(self.requested_domain)
+            kpis = domain_pack.kpis
+        else:
+            kpis = ai_kpis
         
         return GoalKPIsResult(
             domain=self.requested_domain,
-            kpis=domain_pack.kpis,
+            kpis=kpis,
             compatibility=compatibility
         )
+    
+    def _get_ai_powered_kpis(self) -> List[str]:
+        """Use AI to analyze data and suggest relevant KPIs"""
+        try:
+            # Prepare context for AI
+            columns_str = ", ".join(self.columns)
+            domain_context = f"Domain: {self.requested_domain}" if self.requested_domain else "Domain: Auto-detected"
+            
+            # Add data sample context if available
+            data_context = ""
+            if self.data_sample:
+                data_context = f"\nData Sample: {self.data_sample[:500]}..."
+            
+            prompt = f"""You are a business intelligence expert. Analyze the following data structure and suggest 5-8 relevant KPIs (Key Performance Indicators) for business analysis.
+
+{domain_context}
+Columns: {columns_str}
+{data_context}
+
+Based on the data structure, suggest specific, measurable KPIs that would be valuable for business decision-making. Focus on:
+1. Operational efficiency metrics
+2. Quality and performance indicators  
+3. Customer/patient satisfaction metrics
+4. Financial or resource utilization metrics
+5. Risk and compliance indicators
+
+Return ONLY a JSON array of KPI names, like this:
+["KPI 1", "KPI 2", "KPI 3", "KPI 4", "KPI 5"]
+
+Examples for different domains:
+- Healthcare: ["Patient Show-up Rate", "Average Wait Time", "Readmission Rate", "Bed Occupancy", "Patient Satisfaction Score"]
+- Retail: ["Conversion Rate", "Average Order Value", "Customer Lifetime Value", "Inventory Turnover", "Return Rate"]
+- Finance: ["Loan Default Rate", "Customer Acquisition Cost", "Net Promoter Score", "Operational Efficiency Ratio", "Risk Score"]
+
+Return only the JSON array:"""
+
+            # Call AI
+            response = llm_client.call(prompt, max_tokens=300)
+            
+            # Parse AI response
+            if response and isinstance(response, str):
+                # Extract JSON from response
+                import re
+                json_match = re.search(r'\[.*?\]', response, re.DOTALL)
+                if json_match:
+                    kpis_json = json_match.group(0)
+                    kpis = json.loads(kpis_json)
+                    if isinstance(kpis, list) and len(kpis) > 0:
+                        print(f"🤖 AI suggested KPIs: {kpis}")
+                        return kpis
+            
+            print("❌ AI KPI suggestion failed, using fallback")
+            return []
+            
+        except Exception as e:
+            print(f"❌ AI KPI suggestion error: {e}")
+            return []
     
     def _check_compatibility(self) -> DomainCompatibilityResult:
         """Check if dataset matches selected domain"""

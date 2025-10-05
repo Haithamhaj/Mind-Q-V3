@@ -12,6 +12,10 @@ services:
       - ./backend/artifacts:/app/artifacts
     environment:
       - DEBUG=true
+      - LLM_PROVIDER=gemini
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:

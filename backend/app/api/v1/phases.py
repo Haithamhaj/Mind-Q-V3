@@ -364,14 +364,14 @@ async def run_phase1(
         if not cleaned_data_path.exists():
             raise HTTPException(400, "No cleaned data found. Run Phase 0 first.")
         
-        df_sample = pd.read_parquet(cleaned_data_path, nrows=10)
+        df_sample = pd.read_parquet(cleaned_data_path).head(10)
         columns = df_sample.columns.tolist()
         
-        # Run Phase 1
-        service = GoalKPIsService(columns=columns, domain=domain)
+        data_sample = df_sample.to_string(max_rows=5, max_cols=10)
+        
+        service = GoalKPIsService(columns=columns, domain=domain, data_sample=data_sample)
         result = service.run()
         
-        # Stop if incompatible
         if result.compatibility.status == "STOP":
             raise HTTPException(
                 status_code=400,

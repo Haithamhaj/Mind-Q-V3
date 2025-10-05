@@ -18,8 +18,15 @@ export default function Home() {
           <p className="text-sm text-gray-500 mb-6">Version 1.2.2</p>
           
           <div className="space-y-4">
+            <Link to="/bi-dashboard">
+              <Button className="w-full" size="lg" style={{backgroundColor: '#10b981', borderColor: '#10b981'}}>
+                📊 Business Intelligence Dashboard (NEW!)
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+            
             <Link to="/full-pipeline">
-              <Button className="w-full" size="lg">
+              <Button variant="outline" className="w-full">
                 🚀 Mind-Q-V3 Real Analysis Pipeline
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -33,6 +40,7 @@ export default function Home() {
             </Link>
             
             <div className="text-sm text-gray-500">
+              <p><strong>BI Dashboard</strong>: Natural language queries + AI insights</p>
               <p><strong>Mind-Q-V3 Pipeline</strong>: Real backend analysis with your data</p>
               <p><strong>Quick Start</strong>: Quality control + missing data analysis only</p>
             </div>
