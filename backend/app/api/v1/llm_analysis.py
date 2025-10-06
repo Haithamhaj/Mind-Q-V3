@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 
 from app.services.phase14_5_llm_analysis import LLMAnalysisService
-from app.services.llm.client import llm_client
+from app.services.llm.client import LLMConfigurationError, get_llm_client
 from app.services.llm.prompts import SYSTEM_PROMPT, CHAT_PROMPT_TEMPLATE
 from app.models.phase14_5_result import Phase14_5Result, ChatMessage, DecisionLogEntry
 from app.config import settings
@@ -58,7 +58,14 @@ async def chat_with_llm(message: str = Body(..., embed=True), language: str = Bo
         if language == "ar":
             prompt += "\n\nIMPORTANT: Respond in Arabic."
 
-        response_text = llm_client.call(prompt, system=SYSTEM_PROMPT)
+        try:
+            llm = get_llm_client()
+            response_text = llm.call(prompt, system=SYSTEM_PROMPT)
+        except LLMConfigurationError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"LLM is not configured: {exc}",
+            )
 
         chat_message = ChatMessage(
             role="assistant",

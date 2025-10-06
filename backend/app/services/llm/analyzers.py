@@ -1,7 +1,7 @@
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from app.services.llm.client import llm_client
+from app.services.llm.client import LLMConfigurationError, get_llm_client
 from app.services.llm.prompts import (
     SYSTEM_PROMPT,
     FEATURE_IMPORTANCE_PROMPT,
@@ -17,6 +17,14 @@ from app.models.phase14_5_result import (
     ConfusionMatrixInsight,
     Recommendation,
 )
+
+
+def _call_llm(prompt: str, *, max_tokens: int = 4000, system: Optional[str] = SYSTEM_PROMPT) -> str:
+    try:
+        client = get_llm_client()
+        return client.call(prompt, max_tokens=max_tokens, system=system)
+    except LLMConfigurationError as exc:
+        raise Exception(f"LLM configuration error: {exc}") from exc
 
 
 class FeatureAnalyzer:
@@ -48,7 +56,7 @@ class FeatureAnalyzer:
             f1=validation_metrics.get("f1", 0),
         )
 
-        response = llm_client.call(prompt, system=SYSTEM_PROMPT)
+        response = _call_llm(prompt, system=SYSTEM_PROMPT)
         try:
             response = response.replace("```json", "").replace("```", "").strip()
             insights_data = json.loads(response)
@@ -88,7 +96,7 @@ class ModelComparator:
             fp_cost_description=problem_spec.get("fp_cost", "False alarm"),
         )
 
-        response = llm_client.call(prompt, system=SYSTEM_PROMPT)
+        response = _call_llm(prompt, system=SYSTEM_PROMPT)
         try:
             response = response.replace("```json", "").replace("```", "").strip()
             result = json.loads(response)
@@ -128,7 +136,7 @@ class ConfusionMatrixAnalyzer:
             f1=metrics.get("f1", 0),
         )
 
-        response = llm_client.call(prompt, system=SYSTEM_PROMPT)
+        response = _call_llm(prompt, system=SYSTEM_PROMPT)
         try:
             response = response.replace("```json", "").replace("```", "").strip()
             data = json.loads(response)
@@ -164,7 +172,7 @@ class RecommendationGenerator:
             feature_summary=feature_summary,
         )
 
-        response = llm_client.call(prompt, system=SYSTEM_PROMPT)
+        response = _call_llm(prompt, system=SYSTEM_PROMPT)
         try:
             response = response.replace("```json", "").replace("```", "").strip()
             recommendations_data = json.loads(response)
@@ -199,7 +207,7 @@ class ExecutiveSummaryGenerator:
             top_features=top_features_str,
         )
 
-        response = llm_client.call(prompt, system=SYSTEM_PROMPT, max_tokens=2000)
+        response = _call_llm(prompt, system=SYSTEM_PROMPT, max_tokens=2000)
 
         parts = response.split("#")
         executive_summary = ""
@@ -248,7 +256,7 @@ class TargetSuggester:
             columns_summary=columns_summary,
             data_preview=preview,
         )
-        resp = llm_client.call(prompt, system=SYSTEM_PROMPT)
+        resp = _call_llm(prompt, system=SYSTEM_PROMPT)
         try:
             resp = resp.replace("```json", "").replace("```", "").strip()
             return json.loads(resp)
