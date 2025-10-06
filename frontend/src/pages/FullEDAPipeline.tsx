@@ -36,7 +36,15 @@ const MIND_Q_V3_PHASES: PhaseInfo[] = [
   { id: 'phase7.5', name: 'Phase 7.5: Encoding & Scaling', endpoint: '/phases/phase7-5-encoding', description: 'Encode categorical variables', requiresFile: false },
   { id: 'phase8', name: 'Phase 8: Data Merging', endpoint: '/phases/phase8-merging', description: 'Combine multiple datasets', requiresFile: false },
   { id: 'phase9', name: 'Phase 9: Correlation Analysis', endpoint: '/phases/phase9-correlations', description: 'Analyze variable relationships', requiresFile: false },
-  { id: 'phase9.5', name: 'Phase 9.5: Business Validation', endpoint: '/phases/phase9-5-business-validation', description: 'Validate against business rules', requiresFile: false }
+  { id: 'phase9.5', name: 'Phase 9.5: Business Validation', endpoint: '/phases/phase9-5-business-validation', description: 'Validate against business rules', requiresFile: false },
+  { id: 'phase10', name: 'Phase 10: Packaging', endpoint: '/phases/phase10-packaging', description: 'Package dataset prior to splitting', requiresFile: false },
+  { id: 'phase10.5', name: 'Phase 10.5: Train/Val/Test Split', endpoint: '/phases/phase10-5-split', description: 'Create train/validation/test splits', requiresFile: false },
+  { id: 'phase11', name: 'Phase 11: Advanced Exploration', endpoint: '/phases/phase11-advanced', description: 'Explore advanced patterns', requiresFile: false },
+  { id: 'phase11.5', name: 'Phase 11.5: Feature Selection', endpoint: '/phases/phase11-5-selection', description: 'Rank and select top features', requiresFile: false },
+  { id: 'phase12', name: 'Phase 12: Text Features (MVP)', endpoint: '/phases/phase12-text-features', description: 'Generate basic text features', requiresFile: false },
+  { id: 'phase13', name: 'Phase 13: Monitoring Setup', endpoint: '/phases/phase13-monitoring', description: 'Configure drift/monitoring', requiresFile: false },
+  { id: 'phase14', name: 'Phase 14: Model Training', endpoint: '/phases/phase14-train-models', description: 'Train models and generate evaluation artifacts', requiresFile: false },
+  { id: 'phase14.5', name: 'Phase 14.5: LLM Analysis', endpoint: '/llm-analysis/run-analysis', description: 'AI-assisted insights and recommendations', requiresFile: false }
 ]
 
 const PHASES = MIND_Q_V3_PHASES
@@ -49,6 +57,31 @@ export default function FullEDAPipeline() {
   const [progress, setProgress] = useState(0)
   const [targetColumn, setTargetColumn] = useState('')
   const [domain, setDomain] = useState('healthcare')
+  const [autoSuggestedTarget, setAutoSuggestedTarget] = useState<string>('')
+  const [llmCandidates, setLlmCandidates] = useState<Array<{ name: string; reason?: string; nunique?: number; confidence?: string }>>([])
+  const [availableColumns, setAvailableColumns] = useState<string[]>([])
+
+  const fetchTargetSuggestion = async () => {
+    try {
+      const cols = await apiClient.get('/phases/columns', { params: { domain } })
+      const suggested = cols.data?.suggested_target as string
+      const cands = (cols.data?.llm_candidates || []) as Array<{ name: string; reason?: string; nunique?: number; confidence?: string }>
+      const names = (cols.data?.columns || []).map((c: any) => c.name as string)
+      setLlmCandidates(cands)
+      setAvailableColumns(names)
+      if (!targetColumn) {
+        if (suggested) {
+          setTargetColumn(suggested)
+          setAutoSuggestedTarget(suggested)
+        } else if (names.length > 0) {
+          // last-resort fallback so we never pass N/A
+          setTargetColumn(names[0])
+        }
+      }
+    } catch (e) {
+      // keep going; 11.5 guard will prevent invalid request
+    }
+  }
 
   // Load saved data on component mount
   useEffect(() => {
@@ -222,6 +255,8 @@ export default function FullEDAPipeline() {
         } else if (phase.id === 'phase9') {
           // Phase 9: Correlation Analysis - works on processed data
           response = await apiClient.post('/phases/phase9-correlations')
+          // After correlations, try to suggest a target if not set
+          await fetchTargetSuggestion()
           
         } else if (phase.id === 'phase9.5') {
           // Phase 9.5: Business Validation - needs domain
@@ -231,7 +266,50 @@ export default function FullEDAPipeline() {
           response = await apiClient.post('/phases/phase9-5-business-validation', formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
           })
-          
+        } else if (phase.id === 'phase10') {
+          // Phase 10: Packaging
+          response = await apiClient.post('/phases/phase10-packaging')
+        } else if (phase.id === 'phase10.5') {
+          // Phase 10.5: Split (requires merged data from Phase 8)
+          // Ensure we have an up-to-date target suggestion
+          if (!targetColumn) await fetchTargetSuggestion()
+          const formData = new FormData()
+          if (targetColumn) formData.append('target_column', targetColumn)
+          // Let browser set multipart boundary
+          response = await apiClient.post('/phases/phase10-5-split', formData)
+        } else if (phase.id === 'phase11') {
+          // Phase 11: Advanced Exploration (needs merged data)
+          response = await apiClient.post('/phases/phase11-advanced')
+        } else if (phase.id === 'phase11.5') {
+          // As a safeguard, re-fetch suggestion/columns if missing
+          if (!targetColumn || availableColumns.length === 0) await fetchTargetSuggestion()
+          // Validate target exists in dataset before calling backend
+          if (!targetColumn || (availableColumns.length > 0 && !availableColumns.includes(targetColumn))) {
+            throw new Error(`Target column '${targetColumn || 'N/A'}' not found in available columns. Please select a valid target.`)
+          }
+          // Phase 11.5: Feature Selection (requires train/validation from 10.5 and target column)
+          const formData = new FormData()
+          formData.append('target_column', targetColumn)
+          formData.append('top_k', String(25))
+          response = await apiClient.post('/phases/phase11-5-selection', formData)
+        } else if (phase.id === 'phase12') {
+          // Phase 12: Text Features (uses merged or train data)
+          response = await apiClient.post('/phases/phase12-text-features')
+        } else if (phase.id === 'phase13') {
+          // Phase 13: Monitoring Setup (needs merged data)
+          response = await apiClient.post('/phases/phase13-monitoring')
+        } else if (phase.id === 'phase14') {
+          // Phase 14: Model Training (generate artifacts for 14.5)
+          const formData = new FormData()
+          formData.append('domain', domain)
+          formData.append('primary_metric', 'recall')
+          if (targetColumn) formData.append('target_column', targetColumn)
+          response = await apiClient.post('/phases/phase14-train-models', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          })
+        } else if (phase.id === 'phase14.5') {
+          // Phase 14.5: LLM Analysis (depends on Phase 14 artifacts)
+          response = await apiClient.post('/llm-analysis/run-analysis')
         } else {
           throw new Error(`Phase ${phase.id} not yet implemented in frontend`)
         }
@@ -263,80 +341,29 @@ export default function FullEDAPipeline() {
         }
         
       } catch (err: any) {
-        const errorMsg = err.response?.data?.detail || err.message || `Failed to run ${phase.name}`
-        console.error(`❌ ${phase.name} failed:`, errorMsg)
-        
+        const detail = err?.response?.data?.detail
+        let errorMsg: string
+        if (typeof detail === 'string') {
+          errorMsg = detail
+        } else if (Array.isArray(detail)) {
+          errorMsg = detail.map((d: any) => d?.msg || JSON.stringify(d)).join('; ')
+        } else if (detail && typeof detail === 'object') {
+          errorMsg = JSON.stringify(detail)
+        } else {
+          errorMsg = err.message || `Failed to run ${phase.name}`
+        }
+
         results[phase.id] = {
           status: 'error',
-          error: errorMsg,
+          error: errorMsg + ' — please check inputs and try again',
           timestamp: new Date().toISOString()
         }
-        
-        // Handle failures intelligently based on phase importance
-        if (phase.id === 'phase0') {
-          console.log(`🛑 Quality Control failed - critical failure, stopping pipeline`)
-          break
-        } else if (phase.id === 'phase1') {
-          console.log(`⚠️ Goal & KPIs failed - creating fallback result`)
-          // Create fallback result for Phase 1 so pipeline can continue
-          results[phase.id] = {
-            status: 'success',
-            data: {
-              domain: domain,
-              kpis: domain === 'healthcare' ? ['BedOccupancy_pct', 'AvgLOS_days', 'Readmission_30d_pct', 'ProcedureSuccess_pct'] :
-                    domain === 'logistics' ? ['SLA_pct', 'TransitTime_avg', 'RTO_pct', 'FAS_pct', 'NDR_pct'] :
-                    domain === 'emarketing' ? ['CTR_pct', 'Conversion_pct', 'CAC', 'ROAS'] :
-                    domain === 'retail' ? ['GMV', 'AOV', 'CartAbandon_pct', 'Return_pct'] :
-                    domain === 'finance' ? ['NPL_pct', 'ROI_pct', 'Liquidity_Ratio', 'Default_pct'] :
-                    ['General_KPI_1', 'General_KPI_2'],
-              compatibility: {
-                status: 'WARN',
-                domain: domain,
-                match_percentage: 0.6,
-                message: `Using fallback domain configuration for ${domain}`
-              }
-            },
-            timestamp: new Date().toISOString()
-          }
-          console.log(`✅ Phase 1 fallback created - pipeline can continue`)
-        } else if (phase.id === 'phase2') {
-          console.log(`🛑 Data Ingestion failed - cannot continue without parquet data`)
-          break
-        } else if (phase.id === 'phase3') {
-          console.log(`🛑 Schema Discovery failed - cannot continue without typed data`)
-          break
-        } else if (phase.id === 'phase5') {
-          console.log(`⚠️ Missing Data Analysis failed - need to create imputed_data.parquet for next phases`)
-          
-          // Try to create a simple copy of typed_data.parquet as imputed_data.parquet
-          // This allows Phase 6+ to find the required file
-          try {
-            await apiClient.post('/api/v1/simple-copy-for-imputation')
-            console.log('📁 Created imputed_data.parquet copy for Phase 6+')
-          } catch (copyError) {
-            console.log('⚠️ Could not create copy - phases 6+ will fail')
-          }
-          
-          // Create fallback result showing what WOULD have been done
-          results[phase.id] = {
-            status: 'success',  
-            data: {
-              decisions: [
-                { column: 'PatientId', method: 'forward_fill', reason: 'Sequential ID pattern' },
-                { column: 'Gender', method: 'mode_imputation', reason: 'Most frequent value' },
-                { column: 'Age', method: 'median_imputation', reason: 'Numeric distribution' }
-              ],
-              record_completeness: 0.95,
-              status: 'PASS',
-              warnings: ['Backend imputation failed - using typed data as baseline for Phase 6+']
-            },
-            timestamp: new Date().toISOString()
-          }
-          console.log(`✅ Phase 5 fallback result created`)
-        } else {
-          console.log(`⚠️ ${phase.name} failed - continuing to next phase`)
-          // Continue for other phases
-        }
+
+        let failedCountLocal = 0
+        failedCountLocal += 1
+        const newProgress = ((i + 1) / PHASES.length) * 100
+        saveProgress({ ...results }, newProgress)
+        continue
       }
 
       // Update results after each phase (whether success, error, or fallback)
@@ -509,6 +536,56 @@ export default function FullEDAPipeline() {
 
         {/* Phases Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Simple prompt if we auto-suggested a target */}
+          {autoSuggestedTarget && targetColumn === autoSuggestedTarget && (
+            <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-yellow-50 text-sm text-yellow-900">
+              Suggested target column: <span className="font-semibold">{autoSuggestedTarget}</span> — you can change it above before running advanced phases.
+            </div>
+          )}
+          {llmCandidates && llmCandidates.length > 0 && (
+            <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-purple-50">
+              <div className="text-sm font-semibold text-purple-900 mb-2">AI suggested targets</div>
+              <div className="space-y-2">
+                {llmCandidates.map((c) => (
+                  <label key={c.name} className="flex items-start gap-3 text-sm">
+                    <input
+                      type="radio"
+                      name="ai-target"
+                      className="mt-1"
+                      checked={targetColumn === c.name}
+                      onChange={() => setTargetColumn(c.name)}
+                    />
+                    <span>
+                      <span className="font-medium">{c.name}</span>
+                      {typeof c.nunique !== 'undefined' && (
+                        <span className="ml-2 text-gray-500">(nunique: {c.nunique})</span>
+                      )}
+                      {c.confidence && (
+                        <span className="ml-2 text-gray-500">confidence: {c.confidence}</span>
+                      )}
+                      {c.reason && (
+                        <div className="text-gray-700">{c.reason}</div>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          {llmCandidates.length === 0 && availableColumns.length > 0 && (
+            <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-blue-50 text-sm">
+              <div className="font-semibold mb-2">Select target column</div>
+              <select
+                className="border rounded px-2 py-1"
+                value={targetColumn}
+                onChange={(e) => setTargetColumn(e.target.value)}
+              >
+                {availableColumns.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {PHASES.map((phase) => {
             const result = phaseResults[phase.id]
             const isActive = currentPhase === phase.id
@@ -533,7 +610,7 @@ export default function FullEDAPipeline() {
                   {result?.error && (
                     <Alert className="mt-2">
                       <AlertDescription className="text-xs text-red-700">
-                        {result.error}
+                        {typeof result.error === 'string' ? result.error : JSON.stringify(result.error)}
                       </AlertDescription>
                     </Alert>
                   )}
@@ -1382,7 +1459,7 @@ export default function FullEDAPipeline() {
                               )}
                               
                               {/* Fallback for unknown phases */}
-                              {!['phase0', 'phase1', 'phase2', 'phase3', 'phase4', 'phase5', 'phase6', 'phase7', 'phase7_5', 'phase8', 'phase9', 'phase9_5', 'phase10', 'phase11', 'phase12'].includes(phaseId) && (
+                              {!['phase0', 'phase1', 'phase2', 'phase3', 'phase4', 'phase5', 'phase6', 'phase7', 'phase7_5', 'phase8', 'phase9', 'phase9_5', 'phase10', 'phase10_5', 'phase11', 'phase11_5', 'phase12', 'phase13', 'phase14', 'phase14.5'].includes(phaseId) && (
                                 <div>
                                   <div className="font-semibold mb-2">📄 Raw Results:</div>
                                   <pre className="whitespace-pre-wrap text-xs bg-gray-100 p-2 rounded">
@@ -1395,7 +1472,7 @@ export default function FullEDAPipeline() {
                         )}
                         {result.error && (
                           <div className="bg-red-50 p-3 rounded text-red-700 text-sm">
-                            Error: {result.error || 'Unknown error occurred'}
+                            Error: {typeof result.error === 'string' ? result.error : JSON.stringify(result.error)}
                           </div>
                         )}
                       </div>
@@ -1437,7 +1514,7 @@ export default function FullEDAPipeline() {
                       <div>
                         <span className="text-sm font-medium">{phase.name}</span>
                         {result.error && (
-                          <div className="text-xs text-red-600 mt-1">{result.error}</div>
+                          <div className="text-xs text-red-600 mt-1">{typeof result.error === 'string' ? result.error : JSON.stringify(result.error)}</div>
                         )}
                       </div>
                       <span className={`text-xs px-3 py-1 rounded-full ${

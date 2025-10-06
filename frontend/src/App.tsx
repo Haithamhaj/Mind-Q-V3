@@ -4,6 +4,7 @@ import QualityControl from './pages/QualityControl'
 import MissingDataAnalysis from './pages/MissingDataAnalysis'
 import FullEDAPipeline from './pages/FullEDAPipeline'
 import BIDashboard from './pages/BIDashboard'
+import LLMAnalysis from './pages/LLMAnalysis'
 import { PipelineProvider } from './contexts/PipelineContext'
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
           <Route path="/missing-data-analysis" element={<MissingDataAnalysis />} />
           <Route path="/full-pipeline" element={<FullEDAPipeline />} />
           <Route path="/bi-dashboard" element={<BIDashboard />} />
+          <Route path="/llm-analysis" element={<LLMAnalysis />} />
         </Routes>
       </BrowserRouter>
     </PipelineProvider>
