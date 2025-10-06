@@ -28,13 +28,13 @@ class PackagingService:
         # Generate provenance
         provenance = self._generate_provenance()
         provenance_path = self.artifacts_dir / "provenance.json"
-        with open(provenance_path, "w") as f:
+        with open(provenance_path, "w", encoding="utf-8") as f:
             json.dump(provenance, f, indent=2)
         
         # Generate changelog
         changelog = self._generate_changelog()
         changelog_path = self.artifacts_dir / "changelog.md"
-        with open(changelog_path, "w") as f:
+        with open(changelog_path, "w", encoding="utf-8") as f:
             f.write(changelog)
         
         # Create ZIP bundle
@@ -106,17 +106,17 @@ Pipeline Version: 1.2.2
 
 ## Phases Completed
 
-- ✅ Phase 0: Quality Control
-- ✅ Phase 1: Goal & KPIs
-- ✅ Phase 2: Ingestion & Landing
-- ✅ Phase 3: Schema & Dtypes
-- ✅ Phase 4: Profiling
-- ✅ Phase 5: Missing Data Handling
-- ✅ Phase 6: Standardization
-- ✅ Phase 7: Feature Draft
-- ✅ Phase 8: Merging & Keys
-- ✅ Phase 9: Correlations
-- ✅ Phase 9.5: Business Validation
+- Phase 0: Quality Control
+- Phase 1: Goal & KPIs
+- Phase 2: Ingestion & Landing
+- Phase 3: Schema & Dtypes
+- Phase 4: Profiling
+- Phase 5: Missing Data Handling
+- Phase 6: Standardization
+- Phase 7: Feature Draft
+- Phase 8: Merging & Keys
+- Phase 9: Correlations
+- Phase 9.5: Business Validation
 
 ## Artifacts
 
