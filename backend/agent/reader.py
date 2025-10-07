@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 ART_DIR = Path(os.getenv("AGENT_ARTIFACTS_DIR", "backend/artifacts"))
 
@@ -49,3 +49,12 @@ def phase19_metrics() -> Dict[str, float]:
         kpis["thresholds_complete"] = 1.0 if req_keys.issubset(set(j.keys())) else 0.0
         kpis["traceability"] = 1.0
     return kpis
+
+
+def list_existing(names: List[str]) -> List[str]:
+    found: List[str] = []
+    for n in names:
+        p = ART_DIR / n
+        if p.exists():
+            found.append(str(p))
+    return found
