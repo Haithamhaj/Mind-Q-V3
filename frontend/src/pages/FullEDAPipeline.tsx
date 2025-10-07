@@ -60,26 +60,86 @@ export default function FullEDAPipeline() {
   const [autoSuggestedTarget, setAutoSuggestedTarget] = useState<string>('')
   const [llmCandidates, setLlmCandidates] = useState<Array<{ name: string; reason?: string; nunique?: number; confidence?: string }>>([])
   const [availableColumns, setAvailableColumns] = useState<string[]>([])
+  const [targetSuggestionError, setTargetSuggestionError] = useState<string | null>(null)
+  const [textTableFile, setTextTableFile] = useState<File | null>(null)
+  const [textTableName, setTextTableName] = useState<string>('')
+  const [textTableKey, setTextTableKey] = useState<string>('AWB_NO')
+  const [textTableStatus, setTextTableStatus] = useState<string | null>(null)
+  const [registeredTextTables, setRegisteredTextTables] = useState<Record<string, any>>({})
+
+  const handleTargetColumnChange = (newTargetColumn: string) => {
+    setTargetSuggestionError(null)
+    setTargetColumn(newTargetColumn)
+    savePipelineData({
+      domain,
+      targetColumn: newTargetColumn,
+      phaseResults,
+      progress,
+    })
+  }
 
   const fetchTargetSuggestion = async () => {
     try {
+      setTargetSuggestionError(null)
       const cols = await apiClient.get('/phases/columns', { params: { domain } })
       const suggested = cols.data?.suggested_target as string
       const cands = (cols.data?.llm_candidates || []) as Array<{ name: string; reason?: string; nunique?: number; confidence?: string }>
-      const names = (cols.data?.columns || []).map((c: any) => c.name as string)
+      const names = Array.from(new Set((cols.data?.columns || []).map((c: any) => c.name as string)))
       setLlmCandidates(cands)
       setAvailableColumns(names)
+      setAutoSuggestedTarget(suggested || '')
       if (!targetColumn) {
         if (suggested) {
-          setTargetColumn(suggested)
-          setAutoSuggestedTarget(suggested)
+          handleTargetColumnChange(suggested)
         } else if (names.length > 0) {
           // last-resort fallback so we never pass N/A
-          setTargetColumn(names[0])
+          handleTargetColumnChange(names[0])
         }
       }
     } catch (e) {
-      // keep going; 11.5 guard will prevent invalid request
+      setTargetSuggestionError('Unable to auto-suggest a target column. Please type or select the target manually.')
+    }
+  }
+
+  const fetchRegisteredTextTables = async () => {
+    try {
+      const response = await apiClient.get('/phases/phase8/registered-text-tables')
+      setRegisteredTextTables(response.data || {})
+    } catch (error) {
+      console.warn('Failed to load registered text tables', error)
+    }
+  }
+
+  const handleRegisterTextTable = async () => {
+    if (!textTableFile) {
+      setTextTableStatus('Please select a text dataset file before uploading.')
+      return
+    }
+    if (!textTableKey) {
+      setTextTableStatus('Please specify the key column shared with the main dataset.')
+      return
+    }
+
+    try {
+      setTextTableStatus('Uploading text dataset...')
+      const formData = new FormData()
+      formData.append('file', textTableFile)
+      formData.append('dataset_name', textTableName || textTableFile.name)
+      formData.append('key_column', textTableKey)
+
+      await apiClient.post('/phases/phase8/register-text-table', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      setTextTableStatus('Text dataset registered successfully.')
+      setTextTableFile(null)
+      if (!textTableName) {
+        setTextTableName('')
+      }
+      await fetchRegisteredTextTables()
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || error?.message || 'Failed to register text dataset.'
+      setTextTableStatus(message)
     }
   }
 
@@ -99,6 +159,10 @@ export default function FullEDAPipeline() {
         console.log('📄 Found stored file info:', fileInfo.name)
       }
     }
+  }, [])
+
+  useEffect(() => {
+    fetchRegisteredTextTables()
   }, [])
 
   const handleFileSelect = (file: File) => {
@@ -148,17 +212,6 @@ export default function FullEDAPipeline() {
     savePipelineData({
       domain: newDomain,
       targetColumn,
-      phaseResults,
-      progress
-    })
-  }
-
-  // Handle target column change
-  const handleTargetColumnChange = (newTargetColumn: string) => {
-    setTargetColumn(newTargetColumn)
-    savePipelineData({
-      domain,
-      targetColumn: newTargetColumn,
       phaseResults,
       progress
     })
@@ -273,6 +326,9 @@ export default function FullEDAPipeline() {
           // Phase 10.5: Split (requires merged data from Phase 8)
           // Ensure we have an up-to-date target suggestion
           if (!targetColumn) await fetchTargetSuggestion()
+          if (!targetColumn) {
+            throw new Error('Please specify a target column before running Phase 10.5.');
+          }
           const formData = new FormData()
           if (targetColumn) formData.append('target_column', targetColumn)
           // Let browser set multipart boundary
@@ -300,6 +356,9 @@ export default function FullEDAPipeline() {
           response = await apiClient.post('/phases/phase13-monitoring')
         } else if (phase.id === 'phase14') {
           // Phase 14: Model Training (generate artifacts for 14.5)
+          if (!targetColumn) {
+            throw new Error('Please specify a target column before running Phase 14.');
+          }
           const formData = new FormData()
           formData.append('domain', domain)
           formData.append('primary_metric', 'recall')
@@ -536,6 +595,78 @@ export default function FullEDAPipeline() {
 
         {/* Phases Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-white text-sm space-y-3">
+            <div className="font-semibold text-gray-900">Optional Text Dataset Merge</div>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls,.parquet"
+              onChange={(event) => setTextTableFile(event.target.files ? event.target.files[0] : null)}
+              className="w-full border rounded px-3 py-2 text-sm"
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-gray-600">
+              <div>
+                <label className="block text-xs font-semibold mb-1">Dataset name</label>
+                <input
+                  type="text"
+                  value={textTableName}
+                  onChange={(event) => setTextTableName(event.target.value)}
+                  className="w-full border rounded px-2 py-1"
+                  placeholder="Customer Feedback"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Key column</label>
+                <input
+                  type="text"
+                  value={textTableKey}
+                  onChange={(event) => setTextTableKey(event.target.value)}
+                  className="w-full border rounded px-2 py-1"
+                  placeholder="AWB_NO"
+                />
+              </div>
+              <div className="flex items-end">
+                <Button size="sm" onClick={handleRegisterTextTable} disabled={!textTableFile}>
+                  Register text sheet
+                </Button>
+              </div>
+            </div>
+            {textTableStatus && (
+              <p className="text-xs text-gray-600">{textTableStatus}</p>
+            )}
+            {Object.keys(registeredTextTables).length > 0 && (
+              <div className="text-xs text-gray-600">
+                <div className="font-semibold">Registered text datasets</div>
+                <ul className="list-disc list-inside space-y-1">
+                  {Object.entries(registeredTextTables).map(([slug, meta]) => {
+                    const info = meta as { name: string; key_column: string; row_count?: number }
+                    return (
+                      <li key={slug}>
+                        <span className="font-medium">{info.name}</span> — key: {info.key_column} ({info.row_count ?? 0} rows)
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-white text-sm space-y-2">
+            <div className="font-semibold text-gray-900">Target column</div>
+            <input
+              type="text"
+              className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={targetColumn}
+              onChange={(e) => handleTargetColumnChange(e.target.value)}
+              placeholder="Type or select the column that represents your outcome (e.g. STATUS_Return)"
+            />
+            <p className="text-xs text-gray-600">
+              Pick from the AI suggestions below or type the exact column name. This value is required for feature selection and model training.
+            </p>
+            {targetSuggestionError && (
+              <p className="text-xs text-red-600">{targetSuggestionError}</p>
+            )}
+          </div>
+
           {/* Simple prompt if we auto-suggested a target */}
           {autoSuggestedTarget && targetColumn === autoSuggestedTarget && (
             <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-yellow-50 text-sm text-yellow-900">
@@ -553,7 +684,7 @@ export default function FullEDAPipeline() {
                       name="ai-target"
                       className="mt-1"
                       checked={targetColumn === c.name}
-                      onChange={() => setTargetColumn(c.name)}
+                      onChange={() => handleTargetColumnChange(c.name)}
                     />
                     <span>
                       <span className="font-medium">{c.name}</span>
@@ -578,7 +709,7 @@ export default function FullEDAPipeline() {
               <select
                 className="border rounded px-2 py-1"
                 value={targetColumn}
-                onChange={(e) => setTargetColumn(e.target.value)}
+                onChange={(e) => handleTargetColumnChange(e.target.value)}
               >
                 {availableColumns.map((n) => (
                   <option key={n} value={n}>{n}</option>
@@ -1547,3 +1678,5 @@ export default function FullEDAPipeline() {
     </div>
   )
 }
+
+

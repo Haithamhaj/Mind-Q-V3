@@ -219,6 +219,9 @@ If the dataset uses different names, infer semantically similar columns.
 Columns summary (name, dtype, nunique):
 {columns_summary}
 
+Feature dictionary snapshot (alias -> original | role | missing%):
+{feature_metadata}
+
 Data preview (first 10 rows):
 {data_preview}
 
@@ -226,6 +229,7 @@ Guidelines:
 - Prefer columns that represent an outcome we want to predict (e.g., delivered vs returned).
 - Binary targets (nunique=2) are preferred when relevant to the domain.
 - Avoid IDs, timestamps, or high-cardinality identifiers.
+- Use columns marked with role=target_candidate when available. Avoid role=identifier or role=constant.
 - If multiple candidates exist, rank them with short rationale.
  - Reflect domain best practices for why a candidate is appropriate.
  - EXCLUDE columns whose names contain: "missing", "id", "phone", "address", "name", "ref" unless you can justify otherwise.

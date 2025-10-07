@@ -25,12 +25,26 @@ def test_imports():
         return False
     
     try:
+        from app.services.phase12.text_cleaning import TextCleaningService
+        print("[OK] TextCleaningService imported successfully")
+    except ImportError as e:
+        print(f"[FAIL] Failed to import TextCleaningService: {e}")
+        return False
+
+    try:
         from app.services.phase12.basic_features import BasicTextFeaturesService, BasicTextFeatures
         print("[OK] BasicTextFeaturesService imported successfully")
     except ImportError as e:
         print(f"[FAIL] Failed to import BasicTextFeaturesService: {e}")
         return False
     
+    try:
+        from app.services.phase12.keyword_extractor import KeywordExtractionService, KeywordSummary
+        print("[OK] KeywordExtractionService imported successfully")
+    except ImportError as e:
+        print(f"[FAIL] Failed to import KeywordExtractionService: {e}")
+        return False
+
     try:
         from app.services.phase12.sentiment_simple import SentimentAnalysisService, SentimentResult
         print("[OK] SentimentAnalysisService imported successfully")
@@ -58,8 +72,12 @@ def test_basic_functionality():
         
         # Create test data
         df = pd.DataFrame({
-            'description': ['This is a good product'] * 100,
-            'short': ['OK'] * 100,
+            'description': [
+                'This is a good product with detailed packaging information',
+                'Customers reported excellent delivery speed and customer service follow up',
+                'Average quality but packaging was neat and professional',
+                'Support resolved problems quickly and provided guidance'
+            ] * 25,
             'number': range(100)
         })
         
@@ -146,7 +164,9 @@ def test_file_structure():
     required_files = [
         "app/services/phase12/__init__.py",
         "app/services/phase12/detection.py",
+        "app/services/phase12/text_cleaning.py",
         "app/services/phase12/basic_features.py",
+        "app/services/phase12/keyword_extractor.py",
         "app/services/phase12/sentiment_simple.py",
         "app/services/phase12/orchestrator.py",
         "app/services/phase12/FUTURE_ENHANCEMENTS.md",

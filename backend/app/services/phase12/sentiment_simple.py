@@ -4,7 +4,7 @@ Phase 12: Simple Sentiment Analysis Service
 Provides sentiment analysis for English (VADER) and Arabic (rule-based).
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 import numpy as np
 from pydantic import BaseModel
@@ -25,29 +25,42 @@ class SentimentResult(BaseModel):
 
 
 class SentimentAnalysisService:
-    def __init__(self, df: pd.DataFrame, text_columns: List[str], language: str):
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        text_columns: List[str],
+        language: str,
+        cleaned_text: Optional[Dict[str, pd.Series]] = None,
+    ):
         self.df = df
         self.text_columns = text_columns
         self.language = language
+        self.cleaned_text = cleaned_text or {}
+        self.warnings: List[str] = []
         
         # Initialize VADER if available
         if VADER_AVAILABLE:
             self.vader = SentimentIntensityAnalyzer()
         else:
             self.vader = None
-    
+            if language == "en":
+                self.warnings.append(
+                    "VADER sentiment library not installed - falling back to rule-based sentiment."
+                )
+
     def run(self) -> Dict[str, SentimentResult]:
         """Analyze sentiment for each text column"""
         
         results = {}
         
         for col in self.text_columns:
+            series = self.cleaned_text.get(col, self.df[col])
             if self.language == "en" and self.vader:
-                result = self._analyze_english(self.df[col])
+                result = self._analyze_english(series)
             elif self.language == "ar":
-                result = self._analyze_arabic_simple(self.df[col])
+                result = self._analyze_arabic_simple(series)
             else:
-                result = self._analyze_mixed(self.df[col])
+                result = self._analyze_mixed(series)
             
             results[col] = result
         
@@ -65,6 +78,14 @@ class SentimentAnalysisService:
         negative = (scores < -0.05).sum()
         
         total = len(scores)
+        if total == 0:
+            return SentimentResult(
+                positive_ratio=0.0,
+                neutral_ratio=0.0,
+                negative_ratio=0.0,
+                avg_sentiment_score=0.0,
+                method_used="VADER",
+            )
         
         return SentimentResult(
             positive_ratio=round(positive / total, 4),
@@ -109,6 +130,14 @@ class SentimentAnalysisService:
         negative = (scores < 0).sum()
         
         total = len(scores)
+        if total == 0:
+            return SentimentResult(
+                positive_ratio=0.0,
+                neutral_ratio=0.0,
+                negative_ratio=0.0,
+                avg_sentiment_score=0.0,
+                method_used="Arabic_RuleBased",
+            )
         
         return SentimentResult(
             positive_ratio=round(positive / total, 4),

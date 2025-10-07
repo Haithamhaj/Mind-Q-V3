@@ -29,7 +29,7 @@ class AdvancedExplorationService:
         self.df = df  # Always use full dataset for ML accuracy
         self.random_state = random_state
         
-        print(f"🔬 Phase 11: Advanced exploration on full dataset ({len(df):,} rows) for ML accuracy")
+        print(f"[Phase11] Advanced exploration on full dataset ({len(df):,} rows) for ML accuracy")
     
     def run(self, artifacts_dir) -> AdvancedExplorationResult:
         """Execute Phase 11: Advanced Exploration on full dataset"""
@@ -115,7 +115,7 @@ class AdvancedExplorationService:
             "cumulative_variance": [round(v, 4) for v in np.cumsum(variance_explained)]
         }
         
-        with open(artifacts_dir / "pca_variance.json", "w") as f:
+        with open(artifacts_dir / "pca_variance.json", "w", encoding="utf-8") as f:
             json.dump(pca_data, f, indent=2)
         
         return [round(v, 4) for v in variance_explained]
@@ -137,5 +137,4 @@ class AdvancedExplorationService:
         self.df['anomaly_flag'] = anomaly_labels == -1
         
         return int(anomalies), round(anomaly_pct, 4)
-
 

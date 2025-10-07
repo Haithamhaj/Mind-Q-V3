@@ -3,14 +3,22 @@ from typing import List
 import pandas as pd
 import numpy as np
 import json
+from pydantic import BaseModel
 
 from app.config import settings
 from app.services.bi.orchestrator import BIOrchestrator, BIResponse
 from app.services.bi.llm_client import call_llm_api
 from app.services.bi.stats_signals import save_signals_json
 from app.services.ai_recommendations import generate_ai_recommendations
-import json
 import math
+from app.models.kpi import (
+    KPIAdoptionRequest,
+    KPIAdoptionResponse,
+    KPIProposalBundle,
+    KPIValidationRequest,
+    KPIValidationResponse,
+)
+from app.services.bi.kpi_engine import adopt_kpi, generate_kpi_proposals, validate_kpi_proposals
 
 router = APIRouter()
 
@@ -41,6 +49,12 @@ def clean_for_json(obj):
         return str(obj)
 
 
+class KPIProposalRequest(BaseModel):
+    domain: str = "logistics"
+    language: str = "en"
+    count: int = 3
+
+
 def generate_dynamic_kpis(df: pd.DataFrame, domain: str) -> dict:
     """
     Generate truly dynamic KPIs based on actual dataset analysis and AI insights
@@ -51,11 +65,27 @@ def generate_dynamic_kpis(df: pd.DataFrame, domain: str) -> dict:
     kpis["total_records"] = int(df.shape[0])
     kpis["total_columns"] = int(df.shape[1])
     
+    feature_dict = _load_feature_dictionary()
+
     # Analyze the actual dataset structure
     columns = df.columns.tolist()
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
     date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+
+    def _is_ignored(col: str) -> bool:
+        meta = feature_dict.get(col)
+        if not meta:
+            return False
+        return meta.get("recommended_role") in {"identifier", "constant"}
+
+    def _filter(cols):
+        return [c for c in cols if not _is_ignored(c)]
+
+    columns = _filter(columns)
+    numeric_cols = _filter(numeric_cols)
+    categorical_cols = _filter(categorical_cols)
+    date_cols = _filter(date_cols)
     
     # Determine domain dynamically based on column names and data patterns
     detected_domain = _detect_domain_from_data(df, columns)
@@ -111,6 +141,23 @@ def _load_phase1_insights() -> dict:
     except Exception as e:
         print(f"Could not load Phase 1 insights: {e}")
     return {}
+
+
+def _load_feature_dictionary() -> dict:
+    """
+    Load feature dictionary (if generated during packaging).
+    Returns mapping of original name -> metadata.
+    """
+    try:
+        dictionary_path = settings.artifacts_dir / "feature_dictionary.json"
+        if not dictionary_path.exists():
+            return {}
+        with open(dictionary_path, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+        return {entry["name"]: entry for entry in entries}
+    except Exception as e:
+        print(f"Could not load feature dictionary: {e}")
+        return {}
 
 
 def _generate_logistics_kpis(df: pd.DataFrame, columns: list, numeric_cols: list, categorical_cols: list, date_cols: list) -> dict:
@@ -684,3 +731,58 @@ async def get_ai_recommendations(
     except Exception as e:
         print(f"Error generating AI recommendations: {e}")
         raise HTTPException(500, str(e))
+
+
+@router.get("/features/dictionary")
+async def get_feature_dictionary():
+    """
+    Return the feature dictionary generated during Phase 10 packaging.
+    """
+    dictionary_path = settings.artifacts_dir / "feature_dictionary.json"
+    if not dictionary_path.exists():
+        raise HTTPException(404, "Feature dictionary not found. Run Phase 10 packaging first.")
+    try:
+        with open(dictionary_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read feature dictionary: {e}")
+
+
+@router.post("/kpi-proposals", response_model=KPIProposalBundle)
+async def create_kpi_proposals(request: KPIProposalRequest):
+    """
+    Generate KPI proposals powered by feature dictionary, correlations, and LLM reasoning.
+    """
+    if request.count < 1 or request.count > 5:
+        raise HTTPException(status_code=400, detail="count must be between 1 and 5.")
+    try:
+        bundle = generate_kpi_proposals(domain=request.domain, language=request.language, count=request.count)
+        return bundle
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/kpi-proposals/validate", response_model=KPIValidationResponse)
+async def validate_kpi_proposals_endpoint(payload: KPIValidationRequest, domain: str = "logistics"):
+    """
+    Validate candidate KPIs by calculating them against the available dataset.
+    """
+    try:
+        return validate_kpi_proposals(domain=domain, request=payload)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/kpi-proposals/adopt", response_model=KPIAdoptionResponse)
+async def adopt_kpi_endpoint(payload: KPIAdoptionRequest, domain: str = "logistics"):
+    """
+    Store the selected KPI and rationale for auditability.
+    """
+    try:
+        return adopt_kpi(domain=domain, request=payload)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

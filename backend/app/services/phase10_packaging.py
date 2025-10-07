@@ -5,6 +5,9 @@ import hashlib
 from datetime import datetime
 from pydantic import BaseModel
 import zipfile
+import pandas as pd
+
+from app.services.feature_dictionary import FeatureDictionaryService
 
 
 class PackagingResult(BaseModel):
@@ -22,6 +25,9 @@ class PackagingService:
     def run(self) -> PackagingResult:
         """Execute Phase 10: Packaging (Pre-Split)"""
         
+        # Generate feature dictionary before collecting artifacts
+        self._generate_feature_metadata()
+
         # Collect all artifacts
         self._collect_artifacts()
         
@@ -66,6 +72,8 @@ class PackagingService:
             "feature_spec.json",
             "correlation_matrix.json",
             "business_veto_report.json",
+            "feature_dictionary.json",
+            "feature_aliases.json",
             "merged_data.parquet"
         ]
         
@@ -145,5 +153,38 @@ Pipeline Version: 1.2.2
                 zipf.write(self.artifacts_dir / "changelog.md", "changelog.md")
         
         return zip_path
+
+    def _generate_feature_metadata(self) -> None:
+        """Generate feature dictionary and alias mapping for downstream consumption."""
+        try:
+            source_paths = [
+                self.artifacts_dir / "merged_data.parquet",
+                self.artifacts_dir / "train.parquet",
+                self.artifacts_dir / "encoded_data.parquet",
+            ]
+            source_path = next((p for p in source_paths if p.exists()), None)
+            if not source_path:
+                return
+
+            df = pd.read_parquet(source_path)
+            if df.empty:
+                return
+
+            service = FeatureDictionaryService(df)
+            metadata = service.generate()
+
+            dictionary_path = self.artifacts_dir / "feature_dictionary.json"
+            aliases_path = self.artifacts_dir / "feature_aliases.json"
+
+            with open(dictionary_path, "w", encoding="utf-8") as f:
+                json.dump([meta.to_dict() for meta in metadata], f, indent=2, ensure_ascii=False)
+
+            alias_mapping = {meta.name: meta.clean_name for meta in metadata}
+            with open(aliases_path, "w", encoding="utf-8") as f:
+                json.dump(alias_mapping, f, indent=2, ensure_ascii=False)
+
+        except Exception as exc:
+            # Non-fatal, but log for debugging
+            print(f"[Phase10] Warning: could not generate feature dictionary: {exc}")
 
 

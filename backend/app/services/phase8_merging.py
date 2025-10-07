@@ -21,7 +21,7 @@ class MergingResult(BaseModel):
 
 
 class MergingService:
-    def __init__(self, main_df: pd.DataFrame, join_tables: Optional[Dict[str, pd.DataFrame]] = None):
+    def __init__(self, main_df: pd.DataFrame, join_tables: Optional[Dict[str, Dict[str, object]]] = None):
         self.main_df = main_df.copy()
         self.join_tables = join_tables or {}
         self.issues: List[MergingIssue] = []
@@ -38,8 +38,11 @@ class MergingService:
         
         # Merge additional tables if provided
         merged_tables = ["main"]
-        for table_name, df_join in self.join_tables.items():
-            self.main_df = self._merge_table(table_name, df_join)
+        for table_name, table_info in self.join_tables.items():
+            df_join, key_override = self._unpack_table(table_info)
+            if df_join is None:
+                continue
+            self.main_df = self._merge_table(table_name, df_join, key_override)
             merged_tables.append(table_name)
         
         rows_after = len(self.main_df)
@@ -61,15 +64,16 @@ class MergingService:
         
         return self.main_df, result
     
-    def _check_duplicates(self, table_name: str, df: pd.DataFrame):
+    def _check_duplicates(self, table_name: str, df: pd.DataFrame, key_override: Optional[str] = None):
         """Check for duplicate keys"""
-        # Try to identify key column(s)
-        key_candidates = [col for col in df.columns if 'id' in col.lower()]
-        
-        if not key_candidates or len(df) == 0:
+        if len(df) == 0:
             return
-        
-        key_col = key_candidates[0]
+        key_col = key_override
+        if not key_col:
+            key_candidates = [col for col in df.columns if 'id' in col.lower()]
+            if not key_candidates:
+                return
+            key_col = key_candidates[0]
         dup_count = df[key_col].duplicated().sum()
         dup_pct = float(dup_count) / float(len(df)) if len(df) > 0 else 0.0
         
@@ -93,24 +97,27 @@ class MergingService:
                     df.sort_values(timestamp_cols[0], ascending=False, inplace=True)
                     df.drop_duplicates(subset=[key_col], keep='first', inplace=True)
     
-    def _merge_table(self, table_name: str, df_join: pd.DataFrame) -> pd.DataFrame:
+    def _merge_table(self, table_name: str, df_join: pd.DataFrame, key_override: Optional[str]) -> pd.DataFrame:
         """Merge additional table"""
         if len(self.main_df) == 0 or len(df_join) == 0:
             return self.main_df
-        
-        # Find common key
-        common_cols = list(set(self.main_df.columns) & set(df_join.columns))
-        key_cols = [col for col in common_cols if 'id' in col.lower()]
-        
-        if not key_cols:
+
+        key_col = None
+        if key_override and key_override in self.main_df.columns and key_override in df_join.columns:
+            key_col = key_override
+        else:
+            common_cols = list(set(self.main_df.columns) & set(df_join.columns))
+            key_candidates = [col for col in common_cols if 'id' in col.lower()]
+            if key_candidates:
+                key_col = key_candidates[0]
+
+        if not key_col:
             # Skip merge if no common key
             return self.main_df
         
-        key_col = key_cols[0]
-        
         # Check for duplicates in join table
-        self._check_duplicates(table_name, df_join)
-        
+        self._check_duplicates(table_name, df_join, key_col)
+
         # Perform left join
         df_merged = self.main_df.merge(df_join, on=key_col, how='left', suffixes=('', f'_{table_name}'))
         
@@ -156,6 +163,15 @@ class MergingService:
             path = artifacts_dir / f"orphans_{table_name}.parquet"
             df_orphans.to_parquet(path, compression='zstd')
 
+    def _unpack_table(self, table_info: Dict[str, object]) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+        if isinstance(table_info, pd.DataFrame):
+            return table_info, None
+        if isinstance(table_info, dict):
+            dataframe = table_info.get("dataframe")
+            key_column = table_info.get("key_column")
+            if isinstance(dataframe, pd.DataFrame):
+                return dataframe, key_column if isinstance(key_column, str) else None
+        return None, None
 
 
 

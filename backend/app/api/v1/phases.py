@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 import pandas as pd
 from pathlib import Path
+import io
 
 from ...utils.csv_cleaner import CSVCleaner
 from ...models.schemas import (
@@ -28,7 +29,6 @@ from ...services.phase6_standardization import StandardizationService, Standardi
 from ...services.phase7_features import FeatureDraftService, FeatureDraftResult
 from ...services.phase7_5_encoding import EncodingScalingService, EncodingScalingResult
 import json
-from typing import Optional
 from fastapi import Form
 from ...services.phase8_merging import MergingService, MergingResult
 from ...services.phase9_correlations import CorrelationsService, CorrelationsResult
@@ -38,6 +38,7 @@ from ...services.phase10_5_split import SplitService, SplitResult
 from ...services.phase11_advanced import AdvancedExplorationService, AdvancedExplorationResult
 from ...services.phase11_5_selection import FeatureSelectionService, SelectionResult
 from ...services.phase13_monitoring import MonitoringService, MonitoringResult
+from ...services.text_dataset_registry import TextDatasetRegistry
 from ...services.phase12.orchestrator import Phase12Orchestrator, Phase12Result
 from ...services.llm.analyzers import TargetSuggester
 
@@ -192,6 +193,15 @@ async def list_available_columns(domain: str = "general"):
         import pandas as pd
         # Prefer merged data as the most comprehensive
         artifacts = settings.artifacts_dir
+        feature_dict = {}
+        dict_path = artifacts / "feature_dictionary.json"
+        if dict_path.exists():
+            try:
+                with open(dict_path, "r", encoding="utf-8") as f:
+                    entries = json.load(f)
+                feature_dict = {entry["name"]: entry for entry in entries}
+            except Exception:
+                feature_dict = {}
         # Prefer most refined artifacts produced by earlier phases
         candidates = [
             artifacts / "merged_data.parquet",           # after Phase 8/9
@@ -218,10 +228,16 @@ async def list_available_columns(domain: str = "general"):
             try:
                 nunique = int(df_sample[col].nunique(dropna=True))
                 dtype = str(df_sample[col].dtype)
+                meta = feature_dict.get(col, {})
                 cols.append({
                     "name": col,
                     "dtype": dtype,
                     "nunique": nunique,
+                    "alias": meta.get("clean_name"),
+                    "recommended_role": meta.get("recommended_role"),
+                    "description": meta.get("description"),
+                    "is_identifier": meta.get("is_identifier"),
+                    "missing_pct": meta.get("missing_pct"),
                 })
             except Exception:
                 continue
@@ -232,6 +248,7 @@ async def list_available_columns(domain: str = "general"):
                 domain=domain,
                 df=df_sample,
                 columns_meta=cols,
+                feature_dictionary=feature_dict if feature_dict else None,
             )
         except Exception:
             llm_suggestion = {"suggested_target": None, "candidates": []}
@@ -466,11 +483,35 @@ async def run_phase14(
         else:
             raise HTTPException(400, "No dataset found to derive artifacts. Run previous phases first.")
 
-        # Infer target column if not provided
-        if target_column is None:
-            # Choose last column if binary-like, else None
-            candidate = df_source.columns[-1]
-            target_column = str(candidate)
+        provided_target = bool(target_column)
+
+        def _looks_like_id(name: str) -> bool:
+            lname = name.lower()
+            return any(keyword in lname for keyword in ["id", "uuid", "reference", "phone", "address", "name"])
+
+        if provided_target:
+            if target_column not in df_source.columns:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Target column '{target_column}' not found in dataset. Select a valid column before running Phase 14.",
+                )
+            target_column = str(target_column)
+        else:
+            # Heuristic: prefer binary outcomes that are not identifier-like
+            binary_candidates = [
+                col for col in df_source.columns
+                if df_source[col].dropna().nunique() == 2 and not _looks_like_id(str(col))
+            ]
+            if binary_candidates:
+                target_column = str(binary_candidates[0])
+            else:
+                # Fallback to the last column
+                target_column = str(df_source.columns[-1])
+            if df_source[target_column].nunique(dropna=False) == len(df_source):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Unable to infer a suitable target column automatically. Please specify a target column before running Phase 14.",
+                )
 
         # Build feature_importance from first 10 columns (excluding target if present)
         import json
@@ -484,6 +525,7 @@ async def run_phase14(
             "n_features_original": int(len(df_source.columns)),
             "n_features_selected": int(len(numeric_cols)),
             "selected": numeric_cols,
+            "target_column": target_column,
         }
 
         # Simple evaluation report with one model and plausible metrics
@@ -514,6 +556,8 @@ async def run_phase14(
                 }
             },
         }
+        evaluation_report["domain"] = domain
+        evaluation_report["target_column"] = target_column
 
         # Problem spec minimal
         problem_spec = {
@@ -525,17 +569,45 @@ async def run_phase14(
             "fn_cost": "Missed positive case",
         }
 
-        # Write artifacts only if missing (or overwrite for consistency)
-        with open(artifacts / "evaluation_report.json", "w", encoding="utf-8") as f:
+        evaluation_path = artifacts / "evaluation_report.json"
+        stub_tag = "phase14_stub"
+
+        if evaluation_path.exists():
+            try:
+                with open(evaluation_path, "r", encoding="utf-8") as f:
+                    existing_report = json.load(f)
+                if existing_report.get("generated_by") != stub_tag:
+                    return {
+                        "status": "skipped",
+                        "message": "Existing evaluation artifacts detected; skipping stub generation.",
+                        "artifacts_dir": str(artifacts),
+                        "target_column": target_column,
+                    }
+            except Exception:
+                return {
+                    "status": "skipped",
+                    "message": "Existing evaluation artifacts detected; skipping stub generation.",
+                    "artifacts_dir": str(artifacts),
+                    "target_column": target_column,
+                }
+
+        # Write artifacts only if missing (or overwrite stub outputs for consistency)
+        evaluation_report["generated_by"] = stub_tag
+        with open(evaluation_path, "w", encoding="utf-8") as f:
             json.dump(evaluation_report, f, indent=2)
         with open(artifacts / "feature_importance.json", "w", encoding="utf-8") as f:
             json.dump(fi_values, f, indent=2)
         with open(artifacts / "selected_features.json", "w", encoding="utf-8") as f:
             json.dump(selected_features, f, indent=2)
         with open(artifacts / "problem_spec.json", "w", encoding="utf-8") as f:
-            json.dump(problem_spec, f, indent=2)
+            json.dump({**problem_spec, "generated_by": stub_tag}, f, indent=2)
 
-        return {"status": "success", "message": "Phase 14 artifacts generated", "artifacts_dir": str(artifacts)}
+        return {
+            "status": "success",
+            "message": "Phase 14 stub artifacts generated",
+            "artifacts_dir": str(artifacts),
+            "target_column": target_column,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -949,8 +1021,9 @@ async def run_phase8():
         
         df = pd.read_parquet(data_path)
         
-        # For MVP, no additional tables to merge
-        service = MergingService(main_df=df)
+        registry = TextDatasetRegistry(settings.artifacts_dir)
+        join_tables = registry.load_tables()
+        service = MergingService(main_df=df, join_tables=join_tables)
         df_merged, result = service.run(settings.artifacts_dir)
         
         if result.status == "STOP":
@@ -979,6 +1052,48 @@ async def run_phase8():
         raise
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+@router.post("/phase8/register-text-table")
+async def register_text_table(
+    file: UploadFile = File(...),
+    dataset_name: str = Form(...),
+    key_column: str = Form(...),
+):
+    try:
+        content = await file.read()
+        buffer = io.BytesIO(content)
+        filename = file.filename.lower()
+
+        if filename.endswith(".csv"):
+            df = pd.read_csv(buffer)
+        elif filename.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(buffer)
+        elif filename.endswith(".parquet"):
+            df = pd.read_parquet(buffer)
+        else:
+            raise HTTPException(400, "Unsupported file format. Use CSV, Excel, or Parquet.")
+
+        if key_column not in df.columns:
+            raise HTTPException(400, f"Key column '{key_column}' not found in uploaded dataset.")
+
+        registry = TextDatasetRegistry(settings.artifacts_dir)
+        meta = registry.register(dataset_name, key_column, df)
+
+        return {
+            "status": "registered",
+            "dataset": meta,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@router.get("/phase8/registered-text-tables")
+async def list_registered_text_tables():
+    registry = TextDatasetRegistry(settings.artifacts_dir)
+    return registry.list_datasets()
 
 
 @router.post("/phase9-correlations", response_model=CorrelationsResult)

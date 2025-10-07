@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Loader2, AlertTriangle, Info, Database } from "lucide-react"
 import { getPipelineData, savePipelineData } from '@/lib/localStorage'
+import { apiClient } from '@/api/client'
 
 interface KPI {
   key: string
@@ -43,6 +44,64 @@ interface Signals {
   trends: any
 }
 
+interface FeatureMeta {
+  name: string
+  clean_name: string
+  data_type: string
+  semantic_type: string
+  description: string
+  unique_values: number
+  uniqueness_ratio: number
+  missing_pct: number
+  recommended_role: string
+  is_identifier: boolean
+  is_target_candidate: boolean
+}
+
+interface KPIFormulaPayload {
+  type: string
+  format?: string
+  [key: string]: any
+}
+
+interface KPIProposalItem {
+  kpi_id: string
+  name: string
+  alias: string
+  metric_type: string
+  description: string
+  rationale: string
+  financial_impact?: string
+  confidence?: number
+  recommended_direction: 'higher_is_better' | 'lower_is_better' | 'target_range'
+  formula?: KPIFormulaPayload | null
+  required_columns: string[]
+  supporting_evidence: string[]
+  warnings: string[]
+  source: 'llm' | 'system' | 'custom_slot'
+  notes?: string
+  editable: boolean
+}
+
+interface KPIProposalBundleResponse {
+  proposals: KPIProposalItem[]
+  warnings: string[]
+  context_snapshot: Record<string, any>
+}
+
+interface KPIValidationResultItem {
+  proposal: KPIProposalItem
+  status: 'pass' | 'warn' | 'fail'
+  computed_value?: number
+  formatted_value?: string
+  reason?: string | null
+}
+
+interface KPIValidationResponse {
+  results: KPIValidationResultItem[]
+  warnings: string[]
+}
+
 export default function BIDashboard() {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,6 +114,147 @@ export default function BIDashboard() {
   const [signals, setSignals] = useState<Signals | null>(null)
   const [domain, setDomain] = useState('logistics')
   const [pipelineData, setPipelineData] = useState<any>(null)
+  const [featureDictionary, setFeatureDictionary] = useState<FeatureMeta[]>([])
+  const [kpiBundle, setKpiBundle] = useState<KPIProposalBundleResponse | null>(null)
+  const [kpiWarnings, setKpiWarnings] = useState<string[]>([])
+  const [kpiLoading, setKpiLoading] = useState(false)
+  const [kpiError, setKpiError] = useState<string | null>(null)
+  const [kpiValidationResults, setKpiValidationResults] = useState<Record<string, KPIValidationResultItem>>({})
+  const [kpiNameOverrides, setKpiNameOverrides] = useState<Record<string, string>>({})
+  const [kpiNotes, setKpiNotes] = useState<Record<string, string>>({})
+  const [kpiLastAction, setKpiLastAction] = useState<string | null>(null)
+
+  const roleCounts = useMemo(() => {
+    return featureDictionary.reduce((acc: Record<string, number>, meta) => {
+      const role = meta.recommended_role || 'feature'
+      acc[role] = (acc[role] || 0) + 1
+      return acc
+    }, {})
+  }, [featureDictionary])
+
+  const spotlightFeatures = useMemo(() => {
+    return featureDictionary
+      .filter((meta) => meta.is_target_candidate && !meta.is_identifier)
+      .slice(0, 10)
+  }, [featureDictionary])
+
+  const dictionaryRows = useMemo(() => {
+  if (spotlightFeatures.length > 0) {
+    return spotlightFeatures
+  }
+  return featureDictionary.slice(0, 10)
+}, [spotlightFeatures, featureDictionary])
+
+  const slugify = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'custom_kpi'
+
+  const loadKpiProposals = async () => {
+    setKpiLoading(true)
+    setKpiError(null)
+    try {
+      const response = await apiClient.post('/bi/kpi-proposals', {
+        domain,
+        language: 'en',
+        count: 3
+      })
+      const bundle: KPIProposalBundleResponse = response.data
+      setKpiBundle(bundle)
+      setKpiWarnings(bundle.warnings || [])
+      const defaults: Record<string, string> = {}
+      bundle.proposals.forEach((proposal) => {
+        defaults[proposal.kpi_id] = proposal.name
+      })
+      setKpiNameOverrides(defaults)
+      setKpiValidationResults({})
+      setKpiNotes({})
+      setKpiLastAction(null)
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || error?.message || 'Failed to load KPI proposals.'
+      setKpiError(message)
+    } finally {
+      setKpiLoading(false)
+    }
+  }
+
+  const getAdjustedProposal = (proposal: KPIProposalItem): KPIProposalItem => {
+    const overriddenName = kpiNameOverrides[proposal.kpi_id] ?? proposal.name
+    const alias = slugify(overriddenName)
+    return {
+      ...proposal,
+      name: overriddenName,
+      alias
+    }
+  }
+
+  const validateProposal = async (proposal: KPIProposalItem) => {
+    try {
+      const adjusted = getAdjustedProposal(proposal)
+      const response = await apiClient.post(`/bi/kpi-proposals/validate?domain=${domain}`, {
+        proposals: [adjusted]
+      })
+      const validation: KPIValidationResponse = response.data
+      if (validation.results && validation.results.length > 0) {
+        const result = validation.results[0]
+        setKpiValidationResults((prev) => ({
+          ...prev,
+          [proposal.kpi_id]: result
+        }))
+        if (validation.warnings?.length) {
+          setKpiWarnings(validation.warnings)
+        }
+      }
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || error?.message || 'Failed to validate KPI.'
+      setKpiError(message)
+    }
+  }
+
+  const adoptProposal = async (proposal: KPIProposalItem) => {
+    try {
+      const adjusted = getAdjustedProposal(proposal)
+      const notes = kpiNotes[proposal.kpi_id] || undefined
+      await apiClient.post(`/bi/kpi-proposals/adopt?domain=${domain}`, {
+        proposal: adjusted,
+        adopted_name: adjusted.name,
+        notes
+      })
+
+      const validation = kpiValidationResults[proposal.kpi_id]
+      if (validation?.computed_value !== undefined) {
+        const format = validation.formatted_value?.includes('%') ? 'percentage' : 'number'
+        const newEntry: KPI = {
+          key: adjusted.alias,
+          label: adjusted.name,
+          value: validation.computed_value,
+          format
+        }
+        setAccumulatedKpis((prev) => {
+          if (prev.some((item) => item.key === newEntry.key)) {
+            return prev
+          }
+          return [...prev, newEntry]
+        })
+      }
+      setKpiLastAction(`Recorded ${adjusted.name} in decision log.`)
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || error?.message || 'Failed to record KPI decision.'
+      setKpiError(message)
+    }
+  }
+
+  const handleNameOverride = (proposal: KPIProposalItem, value: string) => {
+    setKpiNameOverrides((prev) => ({
+      ...prev,
+      [proposal.kpi_id]: value
+    }))
+  }
+
+  const handleNotesChange = (proposal: KPIProposalItem, value: string) => {
+    setKpiNotes((prev) => ({
+      ...prev,
+      [proposal.kpi_id]: value
+    }))
+  }
 
   // Load pipeline data on mount
   useEffect(() => {
@@ -80,6 +280,12 @@ export default function BIDashboard() {
   useEffect(() => {
     if (domain) {
       loadDashboardData()
+    }
+  }, [domain])
+
+  useEffect(() => {
+    if (domain) {
+      loadKpiProposals()
     }
   }, [domain])
 
@@ -233,67 +439,49 @@ export default function BIDashboard() {
 
   const loadDashboardData = async () => {
     console.log('🔄 Loading dashboard data for domain:', domain)
-    
-    // Load KPIs
+
     try {
-      const kpiRes = await fetch(`http://localhost:8001/api/v1/bi/kpis?domain=${domain}`)
-      if (kpiRes.ok) {
-        const kpiData = await kpiRes.json()
-        setKpis(formatKPIs(kpiData, domain))
-      } else {
-        console.error('Failed to load KPIs:', kpiRes.status)
-        setKpis([])
-      }
+      const { data: kpiData } = await apiClient.get('/bi/kpis', { params: { domain } })
+      setKpis(formatKPIs(kpiData, domain))
     } catch (error) {
       console.error('Failed to load KPIs:', error)
       setKpis([])
     }
 
-    // Load recommendations
     try {
-      const recRes = await fetch(`http://localhost:8001/api/v1/bi/recommendations?domain=${domain}`)
-      if (recRes.ok) {
-        const recData = await recRes.json()
-        setRecommendations(Array.isArray(recData) ? recData : [])
-      } else {
-        console.error('Failed to load recommendations:', recRes.status)
-        setRecommendations([])
-      }
+      const { data: recData } = await apiClient.get('/bi/recommendations', { params: { domain } })
+      setRecommendations(Array.isArray(recData) ? recData : [])
     } catch (error) {
       console.error('Failed to load recommendations:', error)
       setRecommendations([])
     }
 
-    // Load signals (optional - don't let this fail the whole dashboard)
     try {
-      const sigRes = await fetch(`http://localhost:8001/api/v1/bi/signals?domain=${domain}`)
-      if (sigRes.ok) {
-        const sigData = await sigRes.json()
-        setSignals(sigData)
-      } else {
-        console.error('Failed to load signals:', sigRes.status)
-        setSignals(null)
-      }
+      const { data: sigData } = await apiClient.get('/bi/signals', { params: { domain } })
+      setSignals(sigData)
     } catch (error) {
-      console.error('Failed to load signals (optional):', error)
+      console.warn('Failed to load signals (optional):', error)
       setSignals(null)
     }
 
-    // Load AI recommendations
     try {
       console.log('🔍 Loading AI recommendations for domain:', domain)
-      const aiRecRes = await fetch(`http://localhost:8001/api/v1/bi/ai-recommendations?domain=${domain}`)
-      if (aiRecRes.ok) {
-        const aiRecData = await aiRecRes.json()
-        console.log('✅ AI recommendations loaded:', aiRecData)
-        setAiRecommendations(aiRecData)
-      } else {
-        console.error('❌ Failed to load AI recommendations:', aiRecRes.status)
-        setAiRecommendations(null)
-      }
+      const { data: aiRecData } = await apiClient.get('/bi/ai-recommendations', { params: { domain } })
+      console.log('✅ AI recommendations loaded:', aiRecData)
+      setAiRecommendations(aiRecData)
     } catch (error) {
-      console.error('Failed to load AI recommendations:', error)
+      console.error('❌ Failed to load AI recommendations:', error)
       setAiRecommendations(null)
+    }
+
+    try {
+      const { data: featureMeta } = await apiClient.get('/bi/features/dictionary')
+      setFeatureDictionary(Array.isArray(featureMeta) ? featureMeta : [])
+    } catch (error: any) {
+      if (error?.response?.status !== 404) {
+        console.warn('Failed to load feature dictionary:', error)
+      }
+      setFeatureDictionary([])
     }
   }
 
@@ -348,12 +536,11 @@ export default function BIDashboard() {
       formData.append('domain', domain)
       formData.append('time_window', signals?.meta.time_window || '2024-01-01..2024-12-31')
 
-      const res = await fetch('http://localhost:8001/api/v1/bi/ask', {
-        method: 'POST',
-        body: formData
+      const res = await apiClient.post('/bi/ask', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       })
 
-      const data = await res.json()
+      const data = res.data
       setResponse(data)
       
       // Extract KPIs from response and add to accumulated list
@@ -1204,6 +1391,187 @@ export default function BIDashboard() {
                 </CardContent>
               </Card>
 
+            {/* Intelligent KPI Proposals */}
+            <Card>
+              <CardHeader className="sm:flex sm:items-center sm:justify-between">
+                <div>
+                  <CardTitle>Intelligent KPI Proposals</CardTitle>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {kpiBundle?.context_snapshot?.dataset_source
+                      ? `Dataset source: ${kpiBundle.context_snapshot.dataset_source}`
+                      : 'Requires Phase 10 artifacts (feature dictionary, correlations).'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mt-3 sm:mt-0">
+                  {kpiLoading && (
+                    <span className="text-xs text-gray-500 flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Refreshing...
+                    </span>
+                  )}
+                  <Button size="sm" variant="secondary" onClick={loadKpiProposals}>
+                    Refresh Suggestions
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {kpiError && (
+                  <Alert className="border-red-200 bg-red-50 text-red-700">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>{kpiError}</AlertDescription>
+                  </Alert>
+                )}
+
+                {kpiWarnings.length > 0 && (
+                  <Alert className="border-amber-200 bg-amber-50 text-amber-700">
+                    <Info className="h-4 w-4" />
+                    <AlertDescription className="space-y-1">
+                      <div className="font-semibold">Warnings</div>
+                      <ul className="list-disc list-inside text-xs">
+                        {kpiWarnings.map((warning, idx) => (
+                          <li key={idx}>{warning}</li>
+                        ))}
+                      </ul>
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {kpiLastAction && (
+                  <Alert className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>{kpiLastAction}</AlertDescription>
+                  </Alert>
+                )}
+
+                {(kpiBundle?.proposals ?? []).map((proposal) => {
+                  const currentName = kpiNameOverrides[proposal.kpi_id] ?? proposal.name
+                  const validation = kpiValidationResults[proposal.kpi_id]
+                  return (
+                    <div key={proposal.kpi_id} className="border rounded-lg p-4 space-y-3">
+                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-lg font-semibold text-gray-900">{currentName}</h4>
+                            {typeof proposal.confidence === 'number' && (
+                              <Badge variant="outline">
+                                Confidence {(proposal.confidence * 100).toFixed(0)}%
+                              </Badge>
+                            )}
+                            <Badge variant="outline" className="capitalize">
+                              {proposal.metric_type.replace('_', ' ')}
+                            </Badge>
+                            {proposal.source === 'custom_slot' && (
+                              <Badge variant="outline">Custom Slot</Badge>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Alias <code>{proposal.alias}</code> · Direction: {proposal.recommended_direction.replace(/_/g, ' ')}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => validateProposal(proposal)}
+                          >
+                            Validate
+                          </Button>
+                          <Button size="sm" onClick={() => adoptProposal(proposal)}>
+                            Adopt KPI
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="grid md:grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Input
+                            value={currentName}
+                            onChange={(event) => handleNameOverride(proposal, event.target.value)}
+                            placeholder="KPI name"
+                          />
+                          <textarea
+                            className="w-full text-xs border rounded p-2 resize-y min-h-[64px]"
+                            placeholder="Optional context or implementation notes"
+                            value={kpiNotes[proposal.kpi_id] ?? ''}
+                            onChange={(event) => handleNotesChange(proposal, event.target.value)}
+                          />
+                          <div className="text-sm text-gray-700 leading-relaxed">{proposal.description}</div>
+                          {proposal.financial_impact && (
+                            <div className="text-sm text-emerald-600 font-medium">
+                              {proposal.financial_impact}
+                            </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <div>
+                            <div className="text-xs font-semibold text-gray-600 uppercase">Rationale</div>
+                            <p className="text-sm text-gray-700">{proposal.rationale}</p>
+                          </div>
+                          {proposal.supporting_evidence?.length > 0 && (
+                            <div>
+                              <div className="text-xs font-semibold text-gray-600 uppercase">
+                                Supporting Evidence
+                              </div>
+                              <ul className="text-xs text-gray-700 list-disc list-inside space-y-1">
+                                {proposal.supporting_evidence.map((item, idx) => (
+                                  <li key={idx}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {proposal.required_columns?.length > 0 && (
+                            <div className="text-xs text-gray-500">
+                              Requires columns: {proposal.required_columns.join(', ')}
+                            </div>
+                          )}
+                          {proposal.warnings?.length > 0 && (
+                            <Alert className="border-amber-200 bg-amber-50 text-amber-700">
+                              <AlertTriangle className="h-4 w-4" />
+                              <AlertDescription className="space-y-1">
+                                {proposal.warnings.map((warning, idx) => (
+                                  <div key={idx}>{warning}</div>
+                                ))}
+                              </AlertDescription>
+                            </Alert>
+                          )}
+                          {validation && (
+                            <Alert
+                              className={
+                                validation.status === 'pass'
+                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                  : validation.status === 'warn'
+                                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                  : 'border-red-200 bg-red-50 text-red-700'
+                              }
+                            >
+                              <Info className="h-4 w-4" />
+                              <AlertDescription className="text-sm space-y-1">
+                                <div className="font-semibold uppercase tracking-wide text-xs">
+                                  Validation {validation.status.toUpperCase()}
+                                </div>
+                                {validation.formatted_value && (
+                                  <div>
+                                    Current value: <strong>{validation.formatted_value}</strong>
+                                  </div>
+                                )}
+                                {validation.reason && <div>{validation.reason}</div>}
+                              </AlertDescription>
+                            </Alert>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {(kpiBundle?.proposals?.length ?? 0) === 0 && !kpiLoading && (
+                  <div className="text-sm text-gray-500 text-center py-8">
+                    No KPI proposals available yet. Ensure Phase 10 artifacts are generated then refresh suggestions.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Original Automated Recommendations */}
             <Card>
               <CardHeader>
@@ -1283,6 +1651,50 @@ export default function BIDashboard() {
                   </CardContent>
                 </Card>
               </>
+            )}
+
+            {featureDictionary.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Feature Dictionary</CardTitle>
+                  <div className="text-xs text-gray-500">
+                    {Object.entries(roleCounts).map(([role, count]) => (
+                      <span key={role} className="mr-3">
+                        <strong>{count}</strong> {role.replace('_', ' ')}
+                      </span>
+                    ))}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xs text-gray-600 mb-3">
+                    Snippet of detected fields and their recommended roles. Identifier-like columns are excluded from KPI heuristics automatically.
+                  </div>
+                  <div className="overflow-auto border rounded max-h-64">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-gray-100 text-gray-700">
+                        <tr>
+                          <th className="text-left p-2">Column</th>
+                          <th className="text-left p-2">Alias</th>
+                          <th className="text-left p-2">Type</th>
+                          <th className="text-left p-2">Role</th>
+                          <th className="text-left p-2">Missing %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dictionaryRows.map((meta) => (
+                          <tr key={meta.name} className="border-b">
+                            <td className="p-2">{meta.name}</td>
+                            <td className="p-2 text-gray-600">{meta.clean_name}</td>
+                            <td className="p-2 text-gray-600">{meta.semantic_type}</td>
+                            <td className="p-2 text-gray-600 capitalize">{meta.recommended_role.replace('_', ' ')}</td>
+                            <td className="p-2 text-gray-600">{meta.missing_pct.toFixed(2)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
         </div>

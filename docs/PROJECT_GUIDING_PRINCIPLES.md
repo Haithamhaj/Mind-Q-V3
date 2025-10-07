@@ -123,6 +123,7 @@ Each recommendation should include an impact estimate such as ROI %, cost saved,
 - Security: anonymize sensitive data by default.
 - Observability: logs, telemetry, confidence metrics for all AI calls.
 - Version control: lock data schemas and transformation code.
+- KPI automation must ground every suggestion in the feature dictionary, correlation summaries, and business validation outputs before presenting options to users.
 
 ## 9. Human-Centered AI
 

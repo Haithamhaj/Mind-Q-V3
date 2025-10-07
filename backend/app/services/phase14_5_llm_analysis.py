@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 from app.services.llm.analyzers import (
     FeatureAnalyzer,
@@ -22,6 +23,7 @@ class LLMAnalysisService:
         feature_importance = self._load_json("feature_importance.json")
         selected_features_info = self._load_json("selected_features.json")
         problem_spec = self._load_json("problem_spec.json")
+        feature_dictionary = self._load_optional_json("feature_dictionary.json")
 
         best_model = evaluation_report.get("best_model", {})
         val_metrics = best_model.get("val_metrics", {})
@@ -31,6 +33,7 @@ class LLMAnalysisService:
             problem_spec=problem_spec,
             selected_features_info=selected_features_info,
             validation_metrics=val_metrics,
+            feature_dictionary=feature_dictionary,
         )
 
         comparison_result = ModelComparator.compare(
@@ -58,6 +61,7 @@ class LLMAnalysisService:
             evaluation_report=evaluation_report,
             feature_insights=feature_insights,
             problem_spec=problem_spec,
+            feature_dictionary=feature_dictionary,
         )
         recommendations_sorted = sorted(recommendations, key=lambda x: x.priority)
 
@@ -66,6 +70,7 @@ class LLMAnalysisService:
             feature_insights=feature_insights,
             recommendations=recommendations_sorted,
             problem_spec=problem_spec,
+            feature_dictionary=feature_dictionary,
         )
 
         decision_log = [
@@ -113,5 +118,20 @@ class LLMAnalysisService:
         log_path = self.artifacts_dir / "decision_log.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump([entry.dict() for entry in result.decision_log], f, indent=2, ensure_ascii=False)
+
+    def _load_optional_json(self, filename: str) -> Optional[dict]:
+        path = self.artifacts_dir / filename
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                mapping = {entry["name"]: entry for entry in data if isinstance(entry, dict) and "name" in entry}
+                if mapping:
+                    return mapping
+            return data
+        except Exception:
+            return None
 
 
