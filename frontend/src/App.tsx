@@ -6,6 +6,7 @@ import FullEDAPipeline from './pages/FullEDAPipeline'
 import BIDashboard from './pages/BIDashboard'
 import LLMAnalysis from './pages/LLMAnalysis'
 import { PipelineProvider } from './contexts/PipelineContext'
+import AgentViewer from './agent/pages/AgentViewer'
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/full-pipeline" element={<FullEDAPipeline />} />
           <Route path="/bi-dashboard" element={<BIDashboard />} />
           <Route path="/llm-analysis" element={<LLMAnalysis />} />
+          <Route path="/agent-viewer" element={<AgentViewer />} />
         </Routes>
       </BrowserRouter>
     </PipelineProvider>

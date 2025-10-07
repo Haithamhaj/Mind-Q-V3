@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.api.v1.router import api_router
+from backend.agent.router import router as agent_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -22,6 +23,7 @@ app.add_middleware(
 
 # API Routes
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(agent_router)  # /agent/* endpoints (read-only)
 
 # Static files for artifacts download
 app.mount("/artifacts", StaticFiles(directory=str(settings.artifacts_dir)), name="artifacts")

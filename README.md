@@ -127,3 +127,29 @@ python backend/validation_scripts/validate_phase0.py
 
 ## Support
 For questions or issues, please refer to the project documentation or create an issue in the repository.
+
+## Agent Read‑only Phase Viewer (New)
+This optional layer adds a read‑only Agent API and UI to inspect phases, KPIs and policies without executing backend services.
+
+Endpoints
+- GET /agent/graph → phases list/graph
+- GET /agent/phase?phase=5 → read metrics from artifacts and compute goal score
+- POST /agent/qa {question, phase} → answers only from docs/policies/artifacts with sources
+
+Run locally
+```bash
+# Backend
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Frontend
+cd frontend
+npm run dev
+# Open http://localhost:5173/agent-viewer
+```
+
+Config
+- AGENT_ARTIFACTS_DIR: override artifacts location (default backend/artifacts)
+
+Notes
+- Read‑only: no writes, no job execution, no changes to backend/app/services/*
+- Policies are under policies/* (phase rules, scoring, best practices)
