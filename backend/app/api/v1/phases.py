@@ -202,23 +202,53 @@ async def list_available_columns(domain: str = "general"):
                 feature_dict = {entry["name"]: entry for entry in entries}
             except Exception:
                 feature_dict = {}
-        # Prefer most refined artifacts produced by earlier phases
-        candidates = [
-            artifacts / "merged_data.parquet",           # after Phase 8/9
-            artifacts / "standardized_data.parquet",     # after Phase 6
-            artifacts / "features_data.parquet",         # after Phase 7
-            artifacts / "encoded_data.parquet",          # after Phase 7.5
-            artifacts / "typed_data.parquet",            # after Phase 3
-            artifacts / "imputed_data.parquet",          # after Phase 5
-            artifacts / "train.parquet",                 # after 10.5
+        domain_keywords = {
+            "logistics": ["status", "deliver", "delivered", "return", "rto", "on_time", "on hold", "origin", "awb", "warehouse"],
+            "e-commerce": ["purchase", "refund", "churn", "fraud", "cart", "order", "customer", "campaign"],
+            "healthcare": ["readmission", "adverse", "no_show", "noshow", "showed", "show_up", "appointment", "patient", "hipertension", "diabetes", "gender", "neighbourhood"],
+            "retail": ["conversion", "coupon", "return", "upsell", "inventory", "store", "sku"],
+            "finance": ["default", "fraud", "late_payment", "closure", "loan", "credit", "balance"],
+        }
+        keywords = domain_keywords.get(domain, domain_keywords["logistics"])
+
+        def keyword_score(columns: list[str]) -> int:
+            lowered = [col.lower() for col in columns]
+            return sum(1 for col in lowered if any(k in col for k in keywords))
+
+        candidate_datasets: list[tuple[int, int, float, Path, "pd.DataFrame"]] = []
+        staged_files = [
+            ("merged_data.parquet", 9),        # Phase 8/9 output
+            ("standardized_data.parquet", 6),  # Phase 6 output
+            ("features_data.parquet", 7),      # Phase 7 output
+            ("encoded_data.parquet", 75),      # Phase 7.5 output
+            ("typed_data.parquet", 3),         # Phase 3 output
+            ("imputed_data.parquet", 5),       # Phase 5 output
+            ("train.parquet", 10),             # Phase 10.5 output
+            ("cleaned_data.parquet", 1),       # Phase 0 output
+            ("raw_ingested.parquet", 2),       # Phase 2 output
         ]
-        df = None
-        for p in candidates:
-            if p.exists():
-                df = pd.read_parquet(p)
-                break
-        if df is None:
+
+        for filename, stage in staged_files:
+            path = artifacts / filename
+            if not path.exists():
+                continue
+            try:
+                df_candidate = pd.read_parquet(path)
+            except Exception:
+                continue
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            score = keyword_score(df_candidate.columns.tolist())
+            candidate_datasets.append((score, stage, mtime, path, df_candidate))
+
+        if not candidate_datasets:
             raise HTTPException(404, "No dataset available to infer columns. Run earlier phases first.")
+
+        # Choose dataset with best keyword match, then by stage, then recency
+        candidate_datasets.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        _, _, _, selected_path, df = candidate_datasets[0]
 
         preview_rows = min(len(df), 10000)
         df_sample = df.head(preview_rows)
@@ -258,15 +288,6 @@ async def list_available_columns(domain: str = "general"):
             lname = name.lower()
             banned = ["missing", "id", "phone", "address", "name", "ref"]
             return any(b in lname for b in banned)
-
-        domain_keywords = {
-            "logistics": ["status", "deliver", "delivered", "return", "rto", "on_time", "on hold"],
-            "e-commerce": ["purchase", "refund", "churn", "fraud"],
-            "healthcare": ["readmission", "adverse", "no_show", "diagnosis"],
-            "retail": ["conversion", "coupon", "return", "upsell"],
-            "finance": ["default", "fraud", "late_payment", "closure"],
-        }
-        keywords = domain_keywords.get(domain, domain_keywords["logistics"])
 
         binary_cols = [c for c in cols if c["nunique"] == 2 and not bad_name(c["name"])]
         keyword_binary = [c for c in binary_cols if any(k in c["name"].lower() for k in keywords)]

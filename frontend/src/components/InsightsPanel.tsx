@@ -1,4 +1,3 @@
-import React from 'react'
 import { TrendingUp, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import RecommendationCard from './RecommendationCard'
 

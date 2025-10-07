@@ -77,6 +77,10 @@ interface KPIProposalItem {
   formula?: KPIFormulaPayload | null
   required_columns: string[]
   supporting_evidence: string[]
+  why_selected?: string
+  expected_outcome?: string
+  monitoring_guidance?: string
+  tradeoffs?: string
   warnings: string[]
   source: 'llm' | 'system' | 'custom_slot'
   notes?: string
@@ -87,6 +91,7 @@ interface KPIProposalBundleResponse {
   proposals: KPIProposalItem[]
   warnings: string[]
   context_snapshot: Record<string, any>
+  explanation?: string
 }
 
 interface KPIValidationResultItem {
@@ -1422,6 +1427,13 @@ export default function BIDashboard() {
                   </Alert>
                 )}
 
+                {kpiBundle?.explanation && (
+                  <Alert className="border-blue-200 bg-blue-50 text-blue-800">
+                    <Info className="h-4 w-4" />
+                    <AlertDescription>{kpiBundle.explanation}</AlertDescription>
+                  </Alert>
+                )}
+
                 {kpiWarnings.length > 0 && (
                   <Alert className="border-amber-200 bg-amber-50 text-amber-700">
                     <Info className="h-4 w-4" />
@@ -1496,6 +1508,11 @@ export default function BIDashboard() {
                             onChange={(event) => handleNotesChange(proposal, event.target.value)}
                           />
                           <div className="text-sm text-gray-700 leading-relaxed">{proposal.description}</div>
+                          {proposal.expected_outcome && (
+                            <div className="text-xs bg-blue-50 border border-blue-100 text-blue-800 p-2 rounded">
+                              <strong>Expected outcome:</strong> {proposal.expected_outcome}
+                            </div>
+                          )}
                           {proposal.financial_impact && (
                             <div className="text-sm text-emerald-600 font-medium">
                               {proposal.financial_impact}
@@ -1507,6 +1524,22 @@ export default function BIDashboard() {
                             <div className="text-xs font-semibold text-gray-600 uppercase">Rationale</div>
                             <p className="text-sm text-gray-700">{proposal.rationale}</p>
                           </div>
+                          {proposal.why_selected && (
+                            <div>
+                              <div className="text-xs font-semibold text-gray-600 uppercase">Why it was selected</div>
+                              <p className="text-sm text-gray-700">{proposal.why_selected}</p>
+                            </div>
+                          )}
+                          {proposal.monitoring_guidance && (
+                            <div className="text-xs text-gray-600">
+                              <strong>Monitoring guidance:</strong> {proposal.monitoring_guidance}
+                            </div>
+                          )}
+                          {proposal.tradeoffs && (
+                            <div className="text-xs text-gray-500">
+                              <strong>Trade-offs:</strong> {proposal.tradeoffs}
+                            </div>
+                          )}
                           {proposal.supporting_evidence?.length > 0 && (
                             <div>
                               <div className="text-xs font-semibold text-gray-600 uppercase">

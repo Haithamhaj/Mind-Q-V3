@@ -82,6 +82,10 @@ def test_kpi_proposal_engine_generates_bundle(tmp_path):
                     "financial_impact": "Improving this KPI reduces penalty fees.",
                     "confidence": 0.9,
                     "recommended_direction": "higher_is_better",
+                    "expected_outcome": "SLA improvements reduce churn and penalties.",
+                    "monitoring_guidance": "Check weekly and alert if SLA dips 2% below baseline.",
+                    "why_selected": "Direct relationship between delivered status and SLA compliance.",
+                    "tradeoffs": "Requires accurate status timestamps.",
                     "formula": {
                         "type": "ratio",
                         "numerator": {
@@ -103,7 +107,8 @@ def test_kpi_proposal_engine_generates_bundle(tmp_path):
                     "required_columns": ["status"],
                     "supporting_evidence": ["status vs sla_flag corr=0.61"],
                 }
-            ]
+            ],
+            "why_options_limited": "Identifier-like fields and high-missing columns were excluded."
         }
     )
 
@@ -118,6 +123,8 @@ def test_kpi_proposal_engine_generates_bundle(tmp_path):
     assert bundle.proposals[0].name == "On-Time Delivery Rate"
     assert bundle.proposals[0].source == "llm"
     assert bundle.proposals[-1].source == "custom_slot"
+    assert bundle.proposals[0].expected_outcome is not None
+    assert bundle.explanation
 
 
 def test_kpi_proposal_validation(tmp_path):

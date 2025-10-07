@@ -33,18 +33,18 @@ const MIND_Q_V3_PHASES: PhaseInfo[] = [
   { id: 'phase5', name: 'Phase 5: Missing Data Analysis', endpoint: '/phases/phase5-missing-data', description: 'Analyze and handle missing values', requiresFile: false },
   { id: 'phase6', name: 'Phase 6: Standardization', endpoint: '/phases/phase6-standardization', description: 'Clean and standardize formats', requiresFile: false },
   { id: 'phase7', name: 'Phase 7: Feature Engineering', endpoint: '/phases/phase7-features', description: 'Create derived features', requiresFile: false },
-  { id: 'phase7.5', name: 'Phase 7.5: Encoding & Scaling', endpoint: '/phases/phase7-5-encoding', description: 'Encode categorical variables', requiresFile: false },
+  { id: 'phase7.5', name: 'Phase 7.5: Encoding & Scaling', endpoint: '/phases/phase7-5-encoding', description: 'Encode categorical variables', requiresFile: false, requiresTarget: true },
   { id: 'phase8', name: 'Phase 8: Data Merging', endpoint: '/phases/phase8-merging', description: 'Combine multiple datasets', requiresFile: false },
   { id: 'phase9', name: 'Phase 9: Correlation Analysis', endpoint: '/phases/phase9-correlations', description: 'Analyze variable relationships', requiresFile: false },
   { id: 'phase9.5', name: 'Phase 9.5: Business Validation', endpoint: '/phases/phase9-5-business-validation', description: 'Validate against business rules', requiresFile: false },
   { id: 'phase10', name: 'Phase 10: Packaging', endpoint: '/phases/phase10-packaging', description: 'Package dataset prior to splitting', requiresFile: false },
-  { id: 'phase10.5', name: 'Phase 10.5: Train/Val/Test Split', endpoint: '/phases/phase10-5-split', description: 'Create train/validation/test splits', requiresFile: false },
+  { id: 'phase10.5', name: 'Phase 10.5: Train/Val/Test Split', endpoint: '/phases/phase10-5-split', description: 'Create train/validation/test splits', requiresFile: false, requiresTarget: true },
   { id: 'phase11', name: 'Phase 11: Advanced Exploration', endpoint: '/phases/phase11-advanced', description: 'Explore advanced patterns', requiresFile: false },
-  { id: 'phase11.5', name: 'Phase 11.5: Feature Selection', endpoint: '/phases/phase11-5-selection', description: 'Rank and select top features', requiresFile: false },
+  { id: 'phase11.5', name: 'Phase 11.5: Feature Selection', endpoint: '/phases/phase11-5-selection', description: 'Rank and select top features', requiresFile: false, requiresTarget: true },
   { id: 'phase12', name: 'Phase 12: Text Features (MVP)', endpoint: '/phases/phase12-text-features', description: 'Generate basic text features', requiresFile: false },
   { id: 'phase13', name: 'Phase 13: Monitoring Setup', endpoint: '/phases/phase13-monitoring', description: 'Configure drift/monitoring', requiresFile: false },
-  { id: 'phase14', name: 'Phase 14: Model Training', endpoint: '/phases/phase14-train-models', description: 'Train models and generate evaluation artifacts', requiresFile: false },
-  { id: 'phase14.5', name: 'Phase 14.5: LLM Analysis', endpoint: '/llm-analysis/run-analysis', description: 'AI-assisted insights and recommendations', requiresFile: false }
+  { id: 'phase14', name: 'Phase 14: Model Training', endpoint: '/phases/phase14-train-models', description: 'Train models and generate evaluation artifacts', requiresFile: false, requiresTarget: true },
+  { id: 'phase14.5', name: 'Phase 14.5: LLM Analysis', endpoint: '/llm-analysis/run-analysis', description: 'AI-assisted insights and recommendations', requiresFile: false, requiresTarget: true }
 ]
 
 const PHASES = MIND_Q_V3_PHASES
@@ -81,16 +81,30 @@ export default function FullEDAPipeline() {
   const fetchTargetSuggestion = async () => {
     try {
       setTargetSuggestionError(null)
-      const cols = await apiClient.get('/phases/columns', { params: { domain } })
-      const suggested = cols.data?.suggested_target as string
-      const cands = (cols.data?.llm_candidates || []) as Array<{ name: string; reason?: string; nunique?: number; confidence?: string }>
-      const names = Array.from(new Set((cols.data?.columns || []).map((c: any) => c.name as string)))
-      setLlmCandidates(cands)
+      const response = await apiClient.get('/phases/columns', { params: { domain } })
+      const payload = response.data ?? {}
+
+      const suggestedTarget =
+        typeof payload.suggested_target === 'string' ? payload.suggested_target : ''
+
+      const candidates = Array.isArray(payload.llm_candidates)
+        ? (payload.llm_candidates as Array<{ name: string; reason?: string; nunique?: number; confidence?: string }>)
+        : []
+
+      const columnEntries = Array.isArray(payload.columns)
+        ? (payload.columns as Array<{ name: string }>)
+        : []
+
+      const nameSet = new Set<string>(columnEntries.map((c) => String(c.name)))
+      const names = Array.from(nameSet)
+
+      setLlmCandidates(candidates)
       setAvailableColumns(names)
-      setAutoSuggestedTarget(suggested || '')
+      setAutoSuggestedTarget(suggestedTarget)
+
       if (!targetColumn) {
-        if (suggested) {
-          handleTargetColumnChange(suggested)
+        if (suggestedTarget) {
+          handleTargetColumnChange(suggestedTarget)
         } else if (names.length > 0) {
           // last-resort fallback so we never pass N/A
           handleTargetColumnChange(names[0])
@@ -196,7 +210,6 @@ export default function FullEDAPipeline() {
 
   const saveProgress = (newResults: Record<string, PhaseResult>, newProgress: number) => {
     setPhaseResults(newResults)
-    setProgress(newProgress)
     
     savePipelineData({
       domain,
@@ -235,6 +248,22 @@ export default function FullEDAPipeline() {
       setCurrentPhase(phase.id)
       const currentProgress = (i / PHASES.length) * 100
       setProgress(currentProgress)
+
+      if (phase.requiresTarget && !targetColumn) {
+        await fetchTargetSuggestion()
+        const guidance = 'Please specify a target column before running advanced phases.'
+        setTargetSuggestionError('Select or type the target column to unlock the remaining phases.')
+        results[phase.id] = {
+          status: 'blocked',
+          error: guidance,
+          timestamp: new Date().toISOString()
+        }
+        const newProgress = ((i + 1) / PHASES.length) * 100
+        setProgress(newProgress)
+        saveProgress({ ...results }, newProgress)
+        await new Promise(resolve => setTimeout(resolve, 250))
+        continue
+      }
 
       try {
         let response
@@ -324,11 +353,6 @@ export default function FullEDAPipeline() {
           response = await apiClient.post('/phases/phase10-packaging')
         } else if (phase.id === 'phase10.5') {
           // Phase 10.5: Split (requires merged data from Phase 8)
-          // Ensure we have an up-to-date target suggestion
-          if (!targetColumn) await fetchTargetSuggestion()
-          if (!targetColumn) {
-            throw new Error('Please specify a target column before running Phase 10.5.');
-          }
           const formData = new FormData()
           if (targetColumn) formData.append('target_column', targetColumn)
           // Let browser set multipart boundary
@@ -337,11 +361,9 @@ export default function FullEDAPipeline() {
           // Phase 11: Advanced Exploration (needs merged data)
           response = await apiClient.post('/phases/phase11-advanced')
         } else if (phase.id === 'phase11.5') {
-          // As a safeguard, re-fetch suggestion/columns if missing
-          if (!targetColumn || availableColumns.length === 0) await fetchTargetSuggestion()
-          // Validate target exists in dataset before calling backend
-          if (!targetColumn || (availableColumns.length > 0 && !availableColumns.includes(targetColumn))) {
-            throw new Error(`Target column '${targetColumn || 'N/A'}' not found in available columns. Please select a valid target.`)
+          if (availableColumns.length === 0) await fetchTargetSuggestion()
+          if (availableColumns.length > 0 && !availableColumns.includes(targetColumn)) {
+            throw new Error(`Target column '${targetColumn}' not found in available columns. Please select a valid target.`)
           }
           // Phase 11.5: Feature Selection (requires train/validation from 10.5 and target column)
           const formData = new FormData()
@@ -356,9 +378,6 @@ export default function FullEDAPipeline() {
           response = await apiClient.post('/phases/phase13-monitoring')
         } else if (phase.id === 'phase14') {
           // Phase 14: Model Training (generate artifacts for 14.5)
-          if (!targetColumn) {
-            throw new Error('Please specify a target column before running Phase 14.');
-          }
           const formData = new FormData()
           formData.append('domain', domain)
           formData.append('primary_metric', 'recall')
@@ -414,20 +433,21 @@ export default function FullEDAPipeline() {
 
         results[phase.id] = {
           status: 'error',
-          error: errorMsg + ' — please check inputs and try again',
+          error: errorMsg + ' - please check inputs and try again',
           timestamp: new Date().toISOString()
         }
 
-        let failedCountLocal = 0
-        failedCountLocal += 1
         const newProgress = ((i + 1) / PHASES.length) * 100
+        setProgress(newProgress)
         saveProgress({ ...results }, newProgress)
         continue
       }
 
       // Update results after each phase (whether success, error, or fallback)
-      const updatedResults = {...results}
-      saveProgress(updatedResults, currentProgress)
+      const updatedResults = { ...results }
+      const newProgress = ((i + 1) / PHASES.length) * 100
+      setProgress(newProgress)
+      saveProgress(updatedResults, newProgress)
       
       // Small delay for better UX  
       await new Promise(resolve => setTimeout(resolve, 300))
@@ -450,12 +470,15 @@ export default function FullEDAPipeline() {
     }
     if (result?.status === 'success') return <CheckCircle className="h-4 w-4 text-green-500" />
     if (result?.status === 'simulated') return <CheckCircle className="h-4 w-4 text-yellow-500" />
+    if (result?.status === 'blocked') return <Clock className="h-4 w-4 text-gray-500" />
     return <XCircle className="h-4 w-4 text-red-500" />
   }
 
   const completedPhases = Object.values(phaseResults).filter(r => r?.status === 'success' || r?.status === 'simulated').length
   const failedPhases = Object.values(phaseResults).filter(r => r?.status === 'error').length
   const simulatedPhases = Object.values(phaseResults).filter(r => r?.status === 'simulated').length
+  const blockedPhases = Object.values(phaseResults).filter(r => r?.status === 'blocked').length
+  const hasBlockedPhases = blockedPhases > 0
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -570,7 +593,7 @@ export default function FullEDAPipeline() {
                 </div>
                 <Progress value={progress} className="w-full" />
                 
-                <div className="grid grid-cols-4 gap-4 text-center">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
                   <div>
                     <div className="text-2xl font-bold text-green-600">{completedPhases - simulatedPhases}</div>
                     <div className="text-sm text-gray-600">Completed</div>
@@ -584,6 +607,10 @@ export default function FullEDAPipeline() {
                     <div className="text-sm text-gray-600">Failed</div>
                   </div>
                   <div>
+                  <div>
+                    <div className="text-2xl font-bold text-gray-600">{blockedPhases}</div>
+                    <div className="text-sm text-gray-600">Blocked</div>
+                  </div>
                     <div className="text-2xl font-bold text-blue-600">{PHASES.length}</div>
                     <div className="text-sm text-gray-600">Total Phases</div>
                   </div>
@@ -597,6 +624,7 @@ export default function FullEDAPipeline() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="md:col-span-2 lg:col-span-3 p-3 rounded border bg-white text-sm space-y-3">
             <div className="font-semibold text-gray-900">Optional Text Dataset Merge</div>
+            <div className="text-xs text-gray-500">Attach customer feedback or service notes; the assistant will reconcile and merge them (via key column) before text analysis.</div>
             <input
               type="file"
               accept=".csv,.xlsx,.xls,.parquet"
@@ -662,6 +690,13 @@ export default function FullEDAPipeline() {
             <p className="text-xs text-gray-600">
               Pick from the AI suggestions below or type the exact column name. This value is required for feature selection and model training.
             </p>
+            {hasBlockedPhases && (
+              <Alert className="border-amber-200 bg-amber-50 text-amber-800">
+                <AlertDescription className="text-xs">
+                  Some advanced phases are paused until you confirm the target column above. Choose a column (or take an AI suggestion) to unlock them.
+                </AlertDescription>
+              </Alert>
+            )}
             {targetSuggestionError && (
               <p className="text-xs text-red-600">{targetSuggestionError}</p>
             )}
@@ -725,8 +760,16 @@ export default function FullEDAPipeline() {
               <Card key={phase.id}               className={`
                 ${isActive ? 'border-blue-500 shadow-lg' : ''}
                 ${result?.status === 'success' ? 'border-green-200 bg-green-50' : ''}
+                  {result?.status === 'blocked' && (
+                    <Alert className="bg-amber-50 border-amber-200 text-amber-800 text-xs mt-2">
+                      <AlertDescription>
+                        Target-dependent phase paused. Select the target column above to run this step.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 ${result?.status === 'simulated' ? 'border-yellow-200 bg-yellow-50' : ''}
                 ${result?.status === 'error' ? 'border-red-200 bg-red-50' : ''}
+                ${result?.status === 'blocked' ? 'border-gray-300 bg-gray-100' : ''}
               `}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-2">
@@ -791,7 +834,7 @@ export default function FullEDAPipeline() {
                     return (
                       <div key={phaseId} className="border rounded-lg p-4">
                         <h4 className="font-semibold text-blue-800 mb-2">
-                          {phase?.name} - {result.status === 'success' ? '✅ Success' : result.status === 'simulated' ? '⚡ Simulated' : '❌ Failed'}
+                          {phase?.name} - {result.status === 'success' ? '✅ Success' : result.status === 'simulated' ? '⚡ Simulated' : result.status === 'blocked' ? '⏸️ Awaiting Target' : '❌ Failed'}
                         </h4>
                         {result.data && (
                           <div className="bg-gray-50 p-3 rounded max-h-64 overflow-y-auto">
@@ -1623,6 +1666,9 @@ export default function FullEDAPipeline() {
                   <div className="flex items-center">
                     <span className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></span>
                     {simulatedPhases} Demo Phases
+                  {blockedPhases > 0 && (
+                    <p>⏸️ <strong>Awaiting Target:</strong> {blockedPhases} phase{blockedPhases === 1 ? '' : 's'} paused until the target column is confirmed.</p>
+                  )}
                   </div>
                   <div className="flex items-center">
                     <span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { ChevronDown, ChevronUp, Target, Zap, TrendingUp } from 'lucide-react'
 
 interface RecommendationCardProps {

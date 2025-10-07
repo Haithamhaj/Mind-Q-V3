@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { AlertCircle, Brain, TrendingUp, MessageSquare } from 'lucide-react'
 import InsightsPanel from '../components/InsightsPanel'
 import ChatInterface from '../components/ChatInterface'

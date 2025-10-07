@@ -85,6 +85,10 @@ class KPIProposal(BaseModel):
     formula: Optional[KPIFormula] = None
     required_columns: List[str] = Field(default_factory=list)
     supporting_evidence: List[str] = Field(default_factory=list)
+    why_selected: Optional[str] = None
+    expected_outcome: Optional[str] = None
+    monitoring_guidance: Optional[str] = None
+    tradeoffs: Optional[str] = None
     source: Literal["llm", "system", "custom_slot"] = "llm"
     warnings: List[str] = Field(default_factory=list)
     notes: Optional[str] = None
@@ -110,6 +114,7 @@ class KPIProposalBundle(BaseModel):
     proposals: List[KPIProposal]
     warnings: List[str] = Field(default_factory=list)
     context_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    explanation: Optional[str] = None
 
 
 class KPIValidationRequest(BaseModel):

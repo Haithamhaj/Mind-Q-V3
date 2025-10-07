@@ -51,9 +51,10 @@ Best practice KPIs in this domain:
 Task:
 - Propose {count} KPIs that best measure performance and align with goals.
 - Avoid identifier/constant columns and columns with >50% missing data.
-- Justify each KPI with financial impact and why it matters now.
+- Justify each KPI with financial impact, expected business outcome, and why it is timely.
 - Suggest short alias (snake_case) based on clean column names.
 - Use columns exactly as provided (alias or original).
+- Provide a short explanation on why only these KPIs were suggested (what filters excluded other options). Report it under `why_options_limited`.
 - Each KPI MUST include a machine-readable formula using the schema below.
 
 Formula Schema (JSON):
@@ -74,12 +75,17 @@ Respond ONLY with JSON:
       "financial_impact": "Each +1% reduces penalty fees by ~5%",
       "confidence": 0.85,
       "recommended_direction": "higher_is_better",
+      "expected_outcome": "Improving this metric raises customer satisfaction and reduces SLA penalties.",
+      "monitoring_guidance": "Track weekly and trigger an alert if it drops more than 3 points below baseline.",
+      "why_selected": "Delivered status and SLA flag show strong correlation; aligns with SLA-focused goals.",
+      "tradeoffs": "Requires reliable status timestamps; improving SLA may increase expedition costs.",
       "formula": {{...}},
       "required_columns": ["status", "sla_flag"],
       "supporting_evidence": ["status vs sla_flag corr=0.61"],
       "warnings": []
     }}
-  ]
+  ],
+  "why_options_limited": "Identifier-like columns and high-missing fields were filtered out; remaining KPIs align with SLA-focused goals."
 }}
 """
 
@@ -172,7 +178,7 @@ class KPIProposalEngine:
         )
 
         raw_response = self.llm_callable(prompt)
-        proposals = self._parse_llm_response(raw_response)
+        proposals, llm_reason = self._parse_llm_response(raw_response)
 
         sanitized: List[KPIProposal] = []
         for proposal in proposals:
@@ -198,12 +204,18 @@ class KPIProposalEngine:
                 formula=None,
                 required_columns=[],
                 supporting_evidence=[],
+                why_selected="Use this slot when you need to define a bespoke business metric.",
+                expected_outcome="Describe the business impact you expect from your custom KPI.",
+                monitoring_guidance="Document how and when you will track this KPI.",
+                tradeoffs="Ensure data availability and definitions are agreed before adoption.",
                 source="custom_slot",
                 warnings=[],
                 notes="Users can replace this placeholder with their own KPI.",
                 editable=True,
             )
         )
+
+        explanation = llm_reason or self._build_proposal_explanation(context, sanitized, df)
 
         return KPIProposalBundle(
             proposals=sanitized,
@@ -215,7 +227,9 @@ class KPIProposalEngine:
                 "has_feature_dictionary": context["has_feature_dictionary"],
                 "has_correlations": context["has_correlations"],
                 "has_business_conflicts": context["has_business_conflicts"],
+                "proposal_explanation": explanation,
             },
+            explanation=explanation,
         )
 
     def validate(self, request: KPIValidationRequest) -> KPIValidationResponse:
@@ -477,7 +491,7 @@ class KPIProposalEngine:
     # Parsing & normalization
     # ------------------------------------------------------------------ #
 
-    def _parse_llm_response(self, text: str) -> List[KPIProposal]:
+    def _parse_llm_response(self, text: str) -> tuple[List[KPIProposal], Optional[str]]:
         if not text:
             raise ValueError("LLM returned empty response.")
 
@@ -493,8 +507,10 @@ class KPIProposalEngine:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Failed to parse LLM JSON: {exc}") from exc
 
+        llm_reason = None
         if isinstance(payload, dict):
             proposals_raw = payload.get("proposals") or payload.get("kpis") or []
+            llm_reason = payload.get("why_options_limited")
         elif isinstance(payload, list):
             proposals_raw = payload
         else:
@@ -506,7 +522,7 @@ class KPIProposalEngine:
                 proposals.append(KPIProposal.model_validate(item))
             except Exception as exc:
                 self._warnings.append(f"Rejected malformed KPI entry: {exc}")
-        return proposals
+        return proposals, llm_reason
 
     def _normalize_proposal(
         self,
@@ -540,7 +556,35 @@ class KPIProposalEngine:
                 return None
 
         alias = proposal.alias or self._slugify(proposal.name)
-        return proposal.model_copy(update={"alias": alias, "required_columns": required})
+
+        def clean(value: Optional[str], fallback: str) -> str:
+            if value is None:
+                return fallback
+            text = str(value).strip()
+            return text or fallback
+
+        update_payload = {
+            "alias": alias,
+            "required_columns": required,
+            "why_selected": clean(
+                proposal.why_selected,
+                "Selected because it links directly to measurable outcomes in the available dataset.",
+            ),
+            "expected_outcome": clean(
+                proposal.expected_outcome,
+                "Describe the business outcome you expect when this KPI improves.",
+            ),
+            "monitoring_guidance": clean(
+                proposal.monitoring_guidance,
+                "Document how frequently this KPI should be reviewed and when to trigger alerts.",
+            ),
+            "tradeoffs": clean(
+                proposal.tradeoffs,
+                "Highlight any prerequisites, data limitations, or trade-offs to watch out for.",
+            ),
+        }
+
+        return proposal.model_copy(update=update_payload)
 
     def _resolve_column(self, name: Optional[str], df: pd.DataFrame) -> Optional[str]:
         if not name:
@@ -663,6 +707,50 @@ class KPIProposalEngine:
         if hasattr(formula, "format") and getattr(formula, "format") == "currency":
             return f"${value:,.2f}"
         return f"{value:,.2f}"
+
+    def _build_proposal_explanation(
+        self,
+        context: Dict[str, Any],
+        proposals: List[KPIProposal],
+        df: pd.DataFrame,
+    ) -> str:
+        candidate_targets = [
+            meta.alias for meta in self._feature_meta.values() if meta.role == "target_candidate"
+        ]
+        identifier_like = [
+            meta.alias for meta in self._feature_meta.values() if meta.role == "identifier"
+        ]
+        high_missing = [
+            meta.alias for meta in self._feature_meta.values() if meta.missing_pct >= 50
+        ]
+        suggested_names = ", ".join([p.name for p in proposals if p.source == "llm"]) or "the suggested KPIs"
+
+        parts: List[str] = []
+        if candidate_targets:
+            sample = ", ".join(candidate_targets[:3])
+            parts.append(
+                f"{suggested_names} build on outcome-style columns such as {sample}, which behave like potential targets in the dataset."
+            )
+        else:
+            parts.append(
+                f"{suggested_names} focus on fields with clear business outcomes because no labelled target columns were detected."
+            )
+
+        if identifier_like:
+            sample = ", ".join(identifier_like[:3])
+            suffix = "…" if len(identifier_like) > 3 else ""
+            parts.append(f"Identifier-like columns ({sample}{suffix}) were excluded to avoid leakage.")
+
+        if high_missing:
+            sample = ", ".join(high_missing[:3])
+            suffix = "…" if len(high_missing) > 3 else ""
+            parts.append(f"Columns with heavy missingness ({sample}{suffix}) were filtered out to keep the KPIs reliable.")
+
+        missing_target = context.get("existing_targets")
+        if missing_target:
+            parts.append("Existing Phase 1 goals were used to cross-check relevance against business expectations.")
+
+        return " ".join(parts)
 
 
 def generate_kpi_proposals(domain: str, language: str = "en", count: int = 3) -> KPIProposalBundle:
